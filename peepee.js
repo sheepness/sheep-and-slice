@@ -497,6 +497,8 @@ function spawnFight() {
 }
 var playerText = [];
 socket.on("ready",(num) => {
+
+	console.log("ready");
 	for (var i=0; i<num; i++) {
 		dice.push([structuredClone(units["fighter"]),structuredClone(units["fighter"]),
 		structuredClone(units["fighter"]),structuredClone(units["fighter"]),structuredClone(units["fighter"])]);
@@ -625,7 +627,7 @@ var diceTemplates={
 		
 	};
 socket.on("init dice",(id,index,unit)=> {
-	console.log(unit);
+	console.log("init dice");
 	var temp = structuredClone(template);
 	//temp.dice=structuredClone(diceTemplates[unit]).dice;
 	switch(unit) {
@@ -781,6 +783,7 @@ socket.on("init dice",(id,index,unit)=> {
 });
 const starting = ["veteran","veteran","veteran","veteran","veteran"];
 socket.on("start",()=> {
+	console.log("start");
 	readyText.alpha=0;
 	initDice();
 	gameState="ingame";
@@ -2529,9 +2532,9 @@ function resolvePoison() {
 			var iron = -1;
 			dice[i][j].ironHp.sort();
 			if (dice[i][j].ironHp.length>0) {
-				for (var i=dice[i][j].ironHp.length-1; i>=0; i--) {
-					if (dice[i][j].ironHp[i]<dice[i][j].maxHp) {
-						iron = dice[i][j].ironHp[i];
+				for (var k=dice[i][j].ironHp.length-1; k>=0; k--) {
+					if (dice[i][j].ironHp[k]<dice[i][j].maxHp) {
+						iron = dice[i][j].ironHp[k];
 						break;
 					}
 				}
@@ -2558,9 +2561,9 @@ function resolvePoison() {
 		var iron = -1;
 		enemies[i].ironHp.sort();
 		if (enemies[i].ironHp.length>0) {
-			for (var i=enemies[i].ironHp.length-1; i>=0; i--) {
-				if (enemies[i].ironHp[i]<enemies[i].hp) {
-					iron = enemies[i].ironHp[i];
+			for (var j=enemies[i].ironHp.length-1; j>=0; j--) {
+				if (enemies[i].ironHp[j]<enemies[i].hp) {
+					iron = enemies[i].ironHp[j];
 					break;
 				}
 			}
@@ -2866,6 +2869,7 @@ function render() {
 			enemyBlockText[i].alpha=0;
 		}
 	}
+	if (gameState == "ingame"||gameState=="upgrade") {
 	for (var i in dice) {
 		for (var j in dice[i]) {
 			g.beginFill(0xFFFFFF);
@@ -2979,6 +2983,7 @@ function render() {
 			}*/
 		}
 	}
+}
 	if (selectedId!=-1) {
 		drawNet(selectedId,selectedIndex,netX,netY);
 	} else if (hoveringId!=-1) {
