@@ -527,7 +527,7 @@ socket.on("ready",(num) => {
 				starting[j]=yellows[0][randSelect];
 			}
 			for (var j in starting) {
-				socket.emit("init dice",i,j,starting[j]);
+				socket.emit("init dice",i,j,"scrapper");//starting[j]);
 			}
 		}
 		socket.emit("start");
@@ -584,6 +584,7 @@ var template = {
 	exert:0,
 	rampage:false,
 	petrify:0,
+	thorns:0,
 	magicImmune:false,
 		duplicate: false,
 		singleUse: [false,false,false,false,false,false],
@@ -2130,7 +2131,7 @@ function getPips(type,pips,keywords,user) {
 	}
 	if (effects.bloodlust) {
 		for (var i in enemies) {
-			if (enemies[i].hp<enemies[i].maxHp) {
+			if (enemies[i].hp<enemies[i].maxHp&&!enemies[i].dead) {
 				pips++;
 			}
 		}
@@ -2643,6 +2644,14 @@ function recoverEnemies() {
 }
 var keywordInfo = {
 	"pain": "damages itself by pips",
+	"death": "dies",
+	"guilt": "dies if lethal",
+	"cleave": "also hits adjacent units",
+	"engage": "double pips if used on full hp target",
+	"pristine": "double pips if user is full hp",
+	"poison": "applies poison equal to pips",
+	"descend": "also hits right unit",
+	"steel": "extra pips equal to block",
 };
 var actionInfo = {
 	"attack": "damages target",
@@ -2951,7 +2960,7 @@ function render() {
 				g.drawRect(dice[i][j].x,dice[i][j].y,dice[i][j].width,dice[i][j].height);
 			}
 			drawHealthBar(dice[i][j].x,dice[i][j].y,dice[i][j].hp,dice[i][j].maxHp,dice[i][j].ironHp);
-			//drawPips(pips,dice[i][j].x,dice[i][j].y,originalPips);
+			drawPips(pips,dice[i][j].x,dice[i][j].y,originalPips);
 			/*switch(dice[i][j].dice[dice[i][j].side][0]) {
 				case "attack":
 					g.beginFill(0xFF0000);
