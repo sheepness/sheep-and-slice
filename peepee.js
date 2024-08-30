@@ -527,7 +527,7 @@ socket.on("ready",(num) => {
 				starting[j]=yellows[0][randSelect];
 			}
 			for (var j in starting) {
-				socket.emit("init dice",i,j,"scrapper");//starting[j]);
+				socket.emit("init dice",i,j,starting[j]);
 			}
 		}
 		socket.emit("start");
