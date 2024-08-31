@@ -15,7 +15,7 @@ var host=false;
 
 var ready = false;
 var rerolls=2;
-var round=4;
+var round=1;
 socket.on("action",(userId,userIndex,targetId,targetIndex) => {
 	if (gameState=="ingame") {
 		var user = getDice(userId,userIndex);
@@ -560,7 +560,7 @@ socket.on("ready",(num) => {
 				starting[j]=yellows[0][randSelect];
 			}
 			for (var j in starting) {
-				socket.emit("init dice",i,j,"whirl");//starting[j]);
+				socket.emit("init dice",i,j,starting[j]);
 			}
 		}
 		socket.emit("start");
