@@ -15,7 +15,7 @@ var host=false;
 
 var ready = false;
 var rerolls=2;
-var round=1;
+var round=4;
 socket.on("action",(userId,userIndex,targetId,targetIndex) => {
 	if (gameState=="ingame") {
 		var user = getDice(userId,userIndex);
@@ -30,10 +30,12 @@ socket.on("action",(userId,userIndex,targetId,targetIndex) => {
 			document.getElementById("history").innerHTML+="<b>"+getDice(targetId,targetIndex).name+" ("+targetIndex+")</b><br />";
 			actionQueue.push([userId,userIndex,targetId,targetIndex]);
 			processQueue();
+			reposition();
 			//updateText();
 		}
 	}
 });
+var connected=false;
 socket.on("id",(id)=>{
 	playerId=id;
 });
@@ -80,6 +82,7 @@ var fightTemplate = {
 	block:0,
 	x:0,
 	y:0,
+	position:0,
 	width:50,
 	height:50,
 	poison:0,
@@ -98,6 +101,7 @@ var fightTemplate = {
 	bramble:false,
 	slimer:false,
 	bones:false,
+	caw:false,
 	thorns:0,
 	petrify:0,
 	magicImmune:false,
@@ -113,13 +117,17 @@ var fightTemplate = {
 	boss:false,
 	stoneHp:[],
 	ironHp:[],
+	allIron:false,
+	ghost:false,
+	ghostHp:[],
+	allGhost:false,
 };
 var fightList = [[["goblin","boar"],["bee","wolf","archer","bee"],["wolf","archer","archer"],["boar","bee","archer"]],[["wolf","boar","bee"]],[["wolf","wolf","archer"],["goblin","goblin","bee","archer"]],[["troll"],["alpha","wolf"],["rat","bramble"]]];
 var bossList = [[["troll"],["alpha","wolf"],["rat","bramble"]],[["slimelet","slimequeen"]],[["bones","lich","bones","bones"]],[["archer","slate","trollking"]],[["archer","caw","dragon"]]];
 
 function generateFight(roundNo) {
 	if (roundNo%4==0) {
-		var bossNo = roundNo/4;
+		var bossNo = roundNo/4-1;
 		return bossList[bossNo][Math.floor(Math.random()*bossList[bossNo].length)];
 	} else {
 		var totalWeight = 4+Math.floor(roundNo/4)+roundNo%4;
@@ -184,7 +192,7 @@ var fightDiceTemplates = {
 	alpha: {minRound:4,maxRound:4,size:3,
 		dice:[["attack",2,["cleave"]],["attack",2,["cleave"]],["attack",6,[]],["attack",6,[]],["summon wolf",1,[]],["summon wolf",1,[]]],},
 	bramble: {minRound:6,maxRound:6,size:3,
-		dice:[["attack",5,[]],["attack",5,[]],["attack",2,["cleave"]],["attack",2,["cleave"]],["attack",2,["poison"]],["attack",4,["poison"]]],},
+		dice:[["attack",5,[]],["attack",5,[]],["attack",2,["cleave"]],["attack",2,["cleave"]],["attack",2,["poison"]],["attack",2,["poison"]]],},
 	slimer: {minRound:2,maxRound:3,size:3,
 		dice:[["attack",2,["cleave"]],["attack",2,["cleave"]],["outer",3,[]],["outer",3,[]],["attack",2,["cleave"]],["attack",2,["cleave"]]]},
 	fanatic: {minRound:3,maxRound:5,size:2,
@@ -203,7 +211,7 @@ var fightDiceTemplates = {
 		dice:[["summon bones",1,[]],["summon bones",1,[]],["summon bones",1,[]],["summon bones",1,[]],["summon bones",1,[]],["summon bones",1,[]]]},
 	shade: {minRound:2,maxRound:2,size:1,
 		dice:[["attack",5,["eliminate"]],["attack",5,["eliminate"]],["attack",4,["eliminate"]],["attack",4,["eliminate"]],["attack",3,["eliminate"]],["attack",3,["eliminate"]]],},
-	seed: {minRound:1,maxRound:1,size:1,
+	seed: {minRound:6,maxRound:6,size:1,
 		dice:[["summon thorn",1,["death"]],["summon thorn",1,["death"]],["summon thorn",1,["death"]],["nothing",0,[]],["nothing",0,[]],["nothing",0,[]]]},
 	snake: {minRound:2,maxRound:4,size:2,
 		dice:[["attack",2,["poison"]],["attack",2,["poison"]],["attack",1,["poison"]],["attack",1,["poison"]],["attack",1,["poison"]],["attack",1,["poison"]]],},
@@ -256,6 +264,10 @@ var fightDiceTemplates = {
 	
 }
 socket.on("spawn",(enemy) => {
+	spawnEnemy(enemy,enemies.length);
+});
+
+function spawnEnemy(enemy,pos) {
 	var temp = structuredClone(fightTemplate);
 	switch (enemy) {
 		case "bee":
@@ -330,144 +342,153 @@ socket.on("spawn",(enemy) => {
 			temp.ironHp=[1];
 			break;
 		case "slimer":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=7;
+			temp.maxHp=7;
 			break;
 		case "fanatic":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=13;
+			temp.maxHp=13;
 			break;
 		case "bones":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=4;
+			temp.maxHp=4;
+			temp.bones=true;
 			break;
 		case "sniper":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=3;
+			temp.maxHp=3;
 			temp.ranged=true;
 			break;
 		case "imp":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=4;
+			temp.maxHp=4;
+			temp.thorns=1;
 			break;
 		case "spider":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=4;
+			temp.maxHp=4;
 			break;
 		case "wisp":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=5;
+			temp.maxHp=5;
 			break;
 		case "grave":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=3;
+			temp.maxHp=3;
+			temp.allIron=true;
 			break;
 		case "shade":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=5;
+			temp.maxHp=5;
 			temp.ranged=true;
+			temp.allGhost = true;
 			break;
 		case "seed":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=1;
+			temp.maxHp=1;
 			break;
 		case "snake":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=5;
+			temp.maxHp=5;
 			break;
 		case "quartz":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=7;
+			temp.maxHp=7;
 			break;
 		case "gnoll":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=3;
+			temp.maxHp=3;
 			break;
 		case "carrier":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=10;
+			temp.maxHp=10;
+			temp.poison=2;
 			break;
 		case "bandit":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=8;
+			temp.maxHp=8;
 			break;
 		case "blind":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=5;
+			temp.maxHp=5;
 			break;
 		case "golem":
 			temp.hp=2;
 			temp.maxHp=2;
+			temp.block=8;
 			break;
 		case "warchief":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=6;
+			temp.maxHp=6;
 			break;
 		case "saber":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=10;
+			temp.maxHp=10;
 			break;
 		case "ghost":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=6;
+			temp.maxHp=6;
 			break;
 		case "caw":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=7;
+			temp.maxHp=7;
+			temp.caw = true;
 			break;
 		case "slate":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=5;
+			temp.maxHp=5;
+			temp.allIron=true;
 			break;
 		case "wizz":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=5;
+			temp.maxHp=5;
 			temp.ranged=true;
 			break;
 		case "demon":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=12;
+			temp.maxHp=12;
 			break;
 		case "spiker":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=13;
+			temp.maxHp=13;
+			temp.thorns=2;
 			break;
 		case "basilisk":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=12;
+			temp.maxHp=12;
 			break;
 		case "cyclops":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=15;
+			temp.maxHp=15;
 			break;
 		case "chomp":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=10;
+			temp.maxHp=10;
 			break;
 		case "banshee":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=10;
+			temp.maxHp=10;
 			break;
 		case "slimequeen":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=13;
+			temp.maxHp=13;
 			break;
 		case "trollking":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=20;
+			temp.maxHp=20;
 			break;
 		case "lich":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=20;
+			temp.maxHp=20;
 			temp.ranged=true;
 			break;
 		case "dragon":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=40;
+			temp.maxHp=40;
 			break;
 		case "hydra":
-			temp.hp=2;
-			temp.maxHp=2;
+			temp.hp=20;
+			temp.maxHp=20;
 			break;
 		
 		default:
@@ -477,10 +498,22 @@ socket.on("spawn",(enemy) => {
 	temp.dice=structuredClone(fightDiceTemplates[enemy]).dice;
 	temp.x=enemies.length*temp.width;
 	temp.y=0;
+	if (temp.allIron) {
+		for (var i=0; i<temp.maxHp;i++) {
+			temp.ironHp.push(i+1);
+		}
+	}
+	if (temp.allGhost) {
+		for (var i=0; i<temp.maxHp;i++) {
+			temp.ghostHp.push(i+1);
+		}
+	}
 
 	temp.name=enemy;
+	temp.position=pos;
 	enemies.push(temp);
-});
+}
+
 function spawnFight() {
 	if (round<=20) {
 		var randFight = generateFight(round);//Math.floor(Math.random()*fightList[round-1].length);
@@ -488,11 +521,11 @@ function spawnFight() {
 			socket.emit("spawn",randFight[i]);
 		}
 	} else {
-		socket.emit("spawn","troll");
-		socket.emit("spawn","troll");
-		socket.emit("spawn","troll");
-		socket.emit("spawn","troll");
-		socket.emit("spawn","troll");
+		socket.emit("spawn","wisp");
+		socket.emit("spawn","wisp");
+		socket.emit("spawn","wisp");
+		socket.emit("spawn","wisp");
+		socket.emit("spawn","wisp");
 	}
 }
 var playerText = [];
@@ -500,10 +533,8 @@ socket.on("ready",(num) => {
 
 	console.log("ready");
 	for (var i=0; i<num; i++) {
-		dice.push([structuredClone(units["fighter"]),structuredClone(units["fighter"]),
-		structuredClone(units["fighter"]),structuredClone(units["fighter"]),structuredClone(units["fighter"])]);
-		initialDice.push([structuredClone(units["fighter"]),structuredClone(units["fighter"]),
-		structuredClone(units["fighter"]),structuredClone(units["fighter"]),structuredClone(units["fighter"])]);
+		dice.push([]);
+		initialDice.push([]);
 		playerText.push(new PIXI.Text("Player "+(i+1)));
 		if (i==playerId) {
 			playerText[i].text+=" (you)";
@@ -529,7 +560,7 @@ socket.on("ready",(num) => {
 				starting[j]=yellows[0][randSelect];
 			}
 			for (var j in starting) {
-				socket.emit("init dice",i,j,starting[j]);
+				socket.emit("init dice",i,j,"whirl");//starting[j]);
 			}
 		}
 		socket.emit("start");
@@ -560,6 +591,7 @@ socket.on("new client", (id)=> {
 	if (playerId==-1) {
 		playerId=id;
 		console.log(id);
+		connected=true;
 	}
 });
 var template = {
@@ -585,15 +617,21 @@ var template = {
 	keywordModifiers:[0,0,0,0,0,0],
 	exert:0,
 	rampage:false,
+	ranged:false,
 	petrify:0,
 	thorns:0,
+	caw:false,
 	magicImmune:false,
 		duplicate: false,
+		duplicateFace: ["attack",1,[]],
 		singleUse: [false,false,false,false,false,false],
 	redirectId:-1,
 	redirectIndex:-1,
 	stoneHp:[],
 	ironHp:[],
+	maxEquipment:2,
+	equipment:[],
+	position:0,
 }
 
 var diceTemplates={
@@ -627,7 +665,10 @@ var diceTemplates={
 		
 	};
 socket.on("init dice",(id,index,unit)=> {
-	console.log("init dice");
+	console.log("init dice" + dice[id].length);
+	spawnDice(id,index,unit,dice[id].length);
+});
+function spawnDice(id,index,unit,pos) {
 	var temp = structuredClone(template);
 	//temp.dice=structuredClone(diceTemplates[unit]).dice;
 	switch(unit) {
@@ -766,6 +807,7 @@ socket.on("init dice",(id,index,unit)=> {
 			break;
 	}
 	temp.dice=structuredClone(diceTemplates[unit]).dice;
+	temp.position=pos;
 	/*if (id==playerId) {
 		temp.x=index*50;
 	} else {
@@ -780,13 +822,14 @@ socket.on("init dice",(id,index,unit)=> {
 			}
 	temp.name=unit;
 	dice[id][index]=temp;
-});
+}
 const starting = ["veteran","veteran","veteran","veteran","veteran"];
 socket.on("start",()=> {
 	console.log("start");
 	readyText.alpha=0;
 	initDice();
 	gameState="ingame";
+	age=0;
 	for (var i in enemies) {
 		enemyHpText[i] = new PIXI.Text(enemies[i].hp);
 		enemyHpText[i].x=i*50;
@@ -908,12 +951,14 @@ socket.on("send",(cmd)=> {
 			document.getElementById("history").innerHTML+="<b>Player "+culprit+"</b> ";
 			document.getElementById("history").innerHTML+="ended turn<br />";
 			resolveAttacks();
+			reposition();
 			resolvePoison();
 			checkDead();
 			removeBlock();
 			locked=false;
 			selectedId=-1;
 			selectedUnit=-1;
+			age++;
 			/*for (var i in ownedDice) {
 				//for (var i in ownedDice) {
 					ownedDice[i].used=false;
@@ -936,6 +981,7 @@ socket.on("send",(cmd)=> {
 			for (var i in enemies) {
 				enemies[i].redirectId=-1;
 				enemies[i].redirectIndex=-1;
+				enemies[i].ghost=false;
 			}
 			actionQueue=[];
 
@@ -991,6 +1037,7 @@ socket.on("send",(cmd)=> {
 			gameState="ingame";
 			playerTurn=false;
 			locked=false;
+				upgradeSent = false;
 			if (host) {
 				enemyTurn=true;
 			}
@@ -1128,9 +1175,10 @@ document.addEventListener('mousemove', (event) => {
 		document.getElementById("dice name").innerHTML=getDice(hoveringId,hoveringIndex).name;
 		if (hoveringId>=0||hoveringId==-2) {
 			var tempDice = getDice(hoveringId,hoveringIndex);
-			document.getElementById("dice name").innerHTML+=", "+tempDice.dice[tempDice.side][0]+" "+tempDice.dice[tempDice.side][1];
-			for (var i in tempDice.dice[tempDice.side][2]) {
-				document.getElementById("dice name").innerHTML+=" "+tempDice.dice[tempDice.side][2][i];
+			var tempFace = getFace(hoveringId,hoveringIndex,tempDice.side);
+			document.getElementById("dice name").innerHTML+=", "+tempFace[0]+" "+tempFace[1];
+			for (var i in tempFace[2]) {
+				document.getElementById("dice name").innerHTML+=" "+tempFace[2][i];
 			}
 		}
 			setInfo();
@@ -1152,9 +1200,11 @@ document.addEventListener('mousemove', (event) => {
 				hoverSide = 5;
 			}
 			if (hoverSide!=-1) {
-				document.getElementById("dice name").innerHTML=tempDice[hoverSide][0]+" "+tempDice[hoverSide][1];
-				for (var i in tempDice[hoverSide][2]) {
-					document.getElementById("dice name").innerHTML+=" "+tempDice[hoverSide][2][i];
+
+				var tempFace = getFace(selectedId,selectedIndex,hoverSide);
+				document.getElementById("dice name").innerHTML=tempFace[0]+" "+tempFace[1];
+				for (var i in tempFace[2]) {
+					document.getElementById("dice name").innerHTML+=" "+tempFace[2][i];
 				}
 				hoveringId = -4;
 			hoveringIndex = hoverSide;
@@ -1179,13 +1229,14 @@ document.addEventListener('mouseup', (event) => {
 	var x = event.pageX-7;
 	var y = event.pageY-7;
 	var hover = -1;
-	var hoverId = -1;
-	var hoverIndex = -1;
 	if (gameState=="waiting") {
 		if (pointInRect(x,y,readyButton.x,readyButton.y,readyButtonWidth,SQUARE)) {
-				ready = true;
-				readyText.alpha=1;
-				return;
+				//ready = true;
+				if (connected) {
+					socket.emit("ready");
+					readyText.alpha=1;
+					return;
+				}
 			}
 	}
 	if (playerTurn&&gameState=="ingame") {
@@ -1193,8 +1244,8 @@ document.addEventListener('mouseup', (event) => {
 			/*for (var i in ownedDice) {
 				if (x>ownedDice[i].x&&x<ownedDice[i].x+ownedDice[i].width&&y>ownedDice[i].y&&y<ownedDice[i].y+ownedDice[i].height) {
 					hover = i;
-					hoverId = playerId;
-					hoverIndex = i;
+					hoveringId = playerId;
+					hoveringIndex = i;
 					break;
 				}
 			}
@@ -1203,11 +1254,11 @@ document.addEventListener('mouseup', (event) => {
 					if (x>unownedDice[i][j].x&&x<unownedDice[i][j].x+unownedDice[i][j].width&&y>unownedDice[i][j].y&&y<unownedDice[i][j].y+unownedDice[i][j].height) {
 						//hover = i;
 						if (i<playerId) {
-							hoverId = i;
+							hoveringId = i;
 						} else {
-							hoverId = i+1;
+							hoveringId = i+1;
 						}
-						hoverIndex = j;
+						hoveringIndex = j;
 						break;
 					}
 				}
@@ -1228,71 +1279,91 @@ document.addEventListener('mouseup', (event) => {
 			for (var i in dice) {
 				for (var j in dice[i]) {
 					if (x>dice[i][j].x&&x<dice[i][j].x+dice[i][j].width&&y>dice[i][j].y&&y<dice[i][j].y+dice[i][j].height) {
-						hoverId = i;
-						hoverIndex = j;
+						hoveringId = i;
+						hoveringIndex = j;
 						break;
 					}
 				}
 			}
 			for (var i in enemies) {
 				if (x>enemies[i].x&&x<enemies[i].x+enemies[i].width&&y>enemies[i].y&&y<enemies[i].y+enemies[i].height) {
-					hoverId = -2;
-					hoverIndex = i;
+					hoveringId = -2;
+					hoveringIndex = i;
 				}
 			}
-			if (hoverId!=-1) {
+			if (hoveringId!=-1) {
 				if (selectedId != playerId) {
-					if (hoverId>=0||hoverId==-2) {
-						if (!getDice(hoverId,hoverIndex).used&&!getDice(hoverId,hoverIndex).dead) {
-							selectedId=hoverId;
-							selectedIndex=hoverIndex;
+					if (hoveringId>=0||hoveringId==-2) {
+						if (!getDice(hoveringId,hoveringIndex).used&&!getDice(hoveringId,hoveringIndex).dead) {
+							selectedId=hoveringId;
+							selectedIndex=hoveringIndex;
 						}
 					}
 				} else {//if (selectedId==playerId){
 					//targettedUnit = hover;
-					if (!getDice(hoverId,hoverIndex).dead) {
-						var tempDice = getDice(selectedId,selectedIndex);
-						var keywords = tempDice.dice[tempDice.side][2];
+					if (validDiceList(hoveringId)) {
+						if (!getDice(hoveringId,hoveringIndex).dead) {
+							var tempDice = getDice(selectedId,selectedIndex);
+							var tempTarget = getDice(hoveringId,hoveringIndex);
+							var keywords = tempDice.dice[tempDice.side][2];
 
-						var heavy = false;
-						for (var i in keywords) {
-							switch (keywords[i]) {
-								case "heavy":
-									heavy=true;
-									break;
+							var heavy = false;
+							var ranged = false;
+							for (var i in keywords) {
+								switch (keywords[i]) {
+									case "ranged":
+										ranged=true;
+										break;
+									case "heavy":
+										heavy=true;
+										break;
+								}
 							}
-						}
 
-						var heavyCheck = true;
-						if (heavy) {
-							if (hoverId>=0) {
-								var highestHp = 1;
-								for (var i in dice[hoverId]) {
-									if (dice[hoverId][i].dead) {
-										continue;
+							var heavyCheck = true;
+							if (heavy) {
+								if (hoveringId>=0) {
+									var highestHp = 1;
+									for (var i in dice[hoveringId]) {
+										if (dice[hoveringId][i].dead) {
+											continue;
+										}
+										highestHp = Math.max(highestHp,dice[hoveringId][i].hp);
 									}
-									highestHp = Math.max(highestHp,dice[hoverId][i].hp);
-								}
-								if (highestHp!=dice[hoverId][hoverIndex].hp) {
-									heavyCheck=false;
-								}
-							} else if (hoverId==-2) {
-								var highestHp=1;
-								for (var i in enemies) {
-									if (enemies[i].dead) {
-										continue;
+									if (highestHp!=dice[hoveringId][hoveringIndex].hp) {
+										heavyCheck=false;
 									}
-									highestHp = Math.max(highestHp,enemies[i].hp);
+								} else if (hoveringId==-2) {
+									var highestHp=1;
+									for (var i in enemies) {
+										if (enemies[i].dead) {
+											continue;
+										}
+										highestHp = Math.max(highestHp,enemies[i].hp);
+									}
+									if (highestHp!=enemies[hoveringIndex].hp) {
+										heavyCheck=false;
+									}
+								} else {
+									console.log("HOW");
 								}
-								if (highestHp!=enemies[hoverIndex].hp) {
-									heavyCheck=false;
-								}
-							} else {
-								console.log("HOW");
 							}
-						}
-						if (heavyCheck) {
-							socket.emit("action",selectedId,selectedIndex,hoverId,hoverIndex);
+
+							var rangedCheck = true;
+							var tempList = getDiceList(hoveringId);
+							if (tempTarget.ranged&&!ranged) {
+								for (var i in tempList) {
+									if (!tempList[i].ranged&&!tempList[i].dead) {
+										rangedCheck=false;
+									}
+								}
+							}
+							if (heavyCheck&&rangedCheck) {
+								socket.emit("action",selectedId,selectedIndex,hoveringId,hoveringIndex);
+								if (tempTarget.caw) {
+									tempTarget.ranged=true;
+								}
+							}
 						}
 					}
 					//selectedUnit = -1;
@@ -1355,8 +1426,7 @@ document.addEventListener('mouseup', (event) => {
 				}
 			}
 		}
-	}
-	else if (upgradeTurn) {
+	} else if (upgradeTurn) {
 		if (hoveringId==-3) {
 			if (selectedId!=-3) {
 				selectedId=-3;
@@ -1365,7 +1435,7 @@ document.addEventListener('mouseup', (event) => {
 				if (selectedIndex==hoveringIndex) {
 					socket.emit("init dice",playerId,upgradeIndices[hoveringIndex],upgrades[hoveringIndex]);
 					upgradeTurn=false;
-					gameState="ugprade waiting";
+					gameState="upgrade waiting";
 					selectedId=-1;
 					selectedIndex=-1;
 					socket.emit("upgrade ready");
@@ -1610,6 +1680,10 @@ function enemyRoll() {
 		var type = enemies[i].dice[roll][0];
 		var pips = enemies[i].dice[roll][1];
 		var keywords = enemies[i].dice[roll][2];
+		var tempFace = getFace(-2,i,roll);
+		type = tempFace[0];
+		pips = tempFace[1];
+		keywords = tempFace[2];
 
 		var dyingTeams = [];
 		var dyingUnits = [];
@@ -1661,8 +1735,16 @@ function enemyRoll() {
 			targetId = Math.floor(Math.random()*dice.length);
 		}
 
+		
+		var tempType = type;
+		var typeCheck = tempType.split(" ");
+		var summonType = "";
 
-		switch(type) {
+		if (typeCheck[0]=="summon") {
+			tempType = "summon";
+			summonType = typeCheck[1];
+		}
+		switch(tempType) {
 			case "attack":
 				var notDyingUnitsIndices = [];
 				var notDeadUnitsIndices = [];
@@ -1719,6 +1801,10 @@ function enemyRoll() {
 						sendTarget(i,targetId,j);
 					}
 				}
+				break;
+			case "summon":
+			default:
+				break;
 		}
 		socket.emit("enemy roll",i,roll);
 		calcIncoming();
@@ -1780,7 +1866,7 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 	var oldId = targetId;
 	var oldIndex = targetIndex;
 	[targetId,targetIndex] = getRedirectedTarget(targetId,targetIndex);
-	var target = getDice(targetId,targetIndex);
+	
 	/*var originalTargetId = targetId;
 	var originalTargetIndex = targetIndex;
 		while (target.redirectId!=-1) {
@@ -1799,6 +1885,10 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 	var originalPips = pips;
 	var keywords = structuredClone(die[side][2]);
 
+	var tempFace = getFace(userId,userIndex,side);
+	type = tempFace[0];
+	pips = tempFace[1];
+	keywords = tempFace[2];
 
 	/*if (user.duplicate[0]!=0) {
 		console.log("sheep")
@@ -1939,15 +2029,96 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 		}
 	}*/
 	pips = getPips(type,pips,keywords,user);
-
-	if (effects.focus) {
-		if (focusTargetId==targetId&&focusTargetIndex==targetIndex) {
-			pips*=2;
+	if (targetId!=-1) {
+		var target = getDice(targetId,targetIndex);
+		if (effects.focus) {
+			if (focusTargetId==targetId&&focusTargetIndex==targetIndex) {
+				pips*=2;
+			}
 		}
-	}
-	if (effects.engage) {
-		if (target.hp==target.maxHp) {
-			pips*=2;
+		if (effects.engage) {
+			if (target.hp==target.maxHp) {
+				pips*=2;
+			}
+		}
+		if (type=="attack all"&&userId!=-2) {
+			if (oldId==-2) {
+				for (var i in enemies) {
+					if (i!=oldIndex) {
+						[tempId,tempIndex] = getRedirectedTarget(oldId,i);
+						if (!getDice(tempId,tempIndex).dead)
+						{act(type,pips,userId,userIndex,tempId,tempIndex);}
+					}
+				}
+			} else if (oldId>=0) {
+				for (var i in dice[oldId]) {
+					if (i!=oldIndex) {
+						[tempId,tempIndex] = getRedirectedTarget(oldId,i);
+						if (!getDice(tempId,tempIndex).dead)
+						{act(type,pips,userId,userIndex,tempId,tempIndex);}
+					}
+				}
+			}
+		}
+
+		if (effects.cleave||effects.descend){
+			console.log(targetId)
+			/*var nextUp = targetIndex-1;
+			while (nextUp>=0&&effects.cleave) {
+				if (!getDice(targetId,nextUp).dead) {
+					act(type,Math.max(0,pips),userId,userIndex,targetId,nextUp,keywords);
+					break;
+				}
+				nextUp--;
+			}
+			var nextDown = targetIndex+1;
+			var highest;
+			if (targetId == -2) {
+				highest = enemies.length-1;
+			} else {
+				highest = dice[targetId].length-1;
+			}
+			while (nextDown<=highest) {
+				if (!getDice(targetId,nextDown).dead) {
+					act(type,Math.max(0,pips),userId,userIndex,targetId,nextDown,keywords);
+					break;
+				}
+				nextDown++;
+			}*/
+			/*var upCounter = oldIndex-1;
+			while (upCounter>=0&&effects.cleave) {
+				[newId,nextUp]=getRedirectedTarget(oldId,upCounter);
+				if (!getDice(newId,nextUp).dead) {
+					act(type,Math.max(0,pips),userId,userIndex,newId,nextUp,keywords);
+					break;
+				}
+				upCounter--;
+			}
+			var downCounter = oldIndex+1;
+			var highest;
+			if (oldId == -2) {
+				highest = enemies.length-1;
+			} else {
+				highest = dice[oldId].length-1;
+			}
+			while (downCounter<=highest) {
+				[newId,nextDown] = getRedirectedTarget(oldId,downCounter);
+				if (!getDice(newId,nextDown).dead) {
+					act(type,Math.max(0,pips),userId,userIndex,newId,nextDown,keywords);
+					break;
+				}
+				downCounter++;
+			}*/
+			var upper,lower;
+			[upper,lower] = cleaveIndices(oldId,oldIndex);
+			if (upper!=-1&&effects.cleave) {
+				[newId,newIndex] = getRedirectedTarget(oldId,upper);
+				act(type,Math.max(0,pips),userId,userIndex,newId,newIndex,keywords);
+			}
+			if (lower!=-1) {
+				[newId,newIndex] = getRedirectedTarget(oldId,lower);
+				act(type,Math.max(0,pips),userId,userIndex,newId,newIndex,keywords);
+			}
 		}
 	}
 	if (effects.selfshield) {
@@ -1959,84 +2130,13 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 	if (effects.pain) {
 		hurt(user,pips);
 	}
-	if (type=="attack all"&&userId!=-2) {
-		if (oldId==-2) {
-			for (var i in enemies) {
-				if (i!=oldIndex) {
-					[tempId,tempIndex] = getRedirectedTarget(oldId,i);
-					if (!getDice(tempId,tempIndex).dead)
-					{act(type,pips,userId,userIndex,tempId,tempIndex);}
-				}
-			}
-		} else if (oldId>=0) {
-			for (var i in dice[oldId]) {
-				if (i!=oldIndex) {
-					[tempId,tempIndex] = getRedirectedTarget(oldId,i);
-					if (!getDice(tempId,tempIndex).dead)
-					{act(type,pips,userId,userIndex,tempId,tempIndex);}
-				}
-			}
-		}
-	}
-
-	if (effects.cleave||effects.descend){
-		console.log(targetId)
-		/*var nextUp = targetIndex-1;
-		while (nextUp>=0&&effects.cleave) {
-			if (!getDice(targetId,nextUp).dead) {
-				act(type,Math.max(0,pips),userId,userIndex,targetId,nextUp,keywords);
-				break;
-			}
-			nextUp--;
-		}
-		var nextDown = targetIndex+1;
-		var highest;
-		if (targetId == -2) {
-			highest = enemies.length-1;
-		} else {
-			highest = dice[targetId].length-1;
-		}
-		while (nextDown<=highest) {
-			if (!getDice(targetId,nextDown).dead) {
-				act(type,Math.max(0,pips),userId,userIndex,targetId,nextDown,keywords);
-				break;
-			}
-			nextDown++;
-		}*/
-		var upCounter = oldIndex-1;
-		while (upCounter>=0&&effects.cleave) {
-			[newId,nextUp]=getRedirectedTarget(oldId,upCounter);
-			if (!getDice(newId,nextUp).dead) {
-				act(type,Math.max(0,pips),userId,userIndex,newId,nextUp,keywords);
-				break;
-			}
-			upCounter--;
-		}
-		var downCounter = oldIndex+1;
-		var highest;
-		if (oldId == -2) {
-			highest = enemies.length-1;
-		} else {
-			highest = dice[oldId].length-1;
-		}
-		while (downCounter<=highest) {
-			[newId,nextDown] = getRedirectedTarget(oldId,downCounter);
-			if (!getDice(newId,nextDown).dead) {
-				act(type,Math.max(0,pips),userId,userIndex,newId,nextDown,keywords);
-				break;
-			}
-			downCounter++;
-		}
-	}
-
 	var lethal = false;
 	if (effects.death) {
-		user.dead=true;
+		kill(userId,userIndex);
+		//user.dead=true;
 		lethal=true;
 	}
-	if (effects.exert) {
-		user.exert=2;
-	}
+	
 	if (effects.duplicate) {
 		if (userId<0) {
 			console.log("wtf");
@@ -2046,15 +2146,24 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 					console.log(userId);
 					console.log(i);
 					dice[userId][i].duplicate=true;//structuredClone(user.dice[side]);
-					dice[userId][i].dice[dice[userId][i].side]=structuredClone(user.dice[side]);
+					dice[userId][i].duplicateFace=structuredClone(user.dice[side]);
+					//dice[userId][i].dice[dice[userId][i].side]=structuredClone(user.dice[side]);
 				}
 			}
 		}
 	}
+
+
+
+	if (effects.exert) {
+		user.exert=2;
+	}
 	if (effects.singleUse) {
 		user.singleUse[side]=true;
 	}
-	for (var index in dice) {
+
+	lethal = checkDead();
+	/*for (var index in dice) {
 		for (var jndex in dice[index]) {
 			if (dice[index][jndex].hp<=0) {
 				if (!dice[index][jndex].dead) {
@@ -2072,9 +2181,10 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 			}
 			enemies[index].dead=true;
 		}
-	}
+	}*/
 	if (effects.guilt&&lethal) {
-		user.dead=true;
+		kill(userId,userIndex);
+		//user.dead=true;
 	}
 	if (effects.growth) {
 		user.keywordModifiers[side]++;
@@ -2117,12 +2227,14 @@ function getPips(type,pips,keywords,user) {
 	for (var i in keywords) {
 		effects[keywords[i]] = true;
 	}
-	if (effects.copycat) {
+	/*if (effects.copycat) {
 		for (i in focusKeywords) {
 			effects[focusKeywords[i]] = true;
 		}
-	}
-	pips+=user.keywordModifiers[user.side];
+	}*/
+	pips+=user.keywordModifiers[user.side]; // 7: in combat buffs
+
+	// 8: static keywords
 	if (effects.steel) {
 		pips+=user.block;
 	}
@@ -2168,7 +2280,15 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 				target.poison+=pips;
 		}
 	}
-	switch (type) {
+	var tempType = type;
+	var typeCheck = tempType.split(" ");
+	var summonType = "";
+
+	if (typeCheck[0]=="summon") {
+		tempType = "summon";
+		summonType = typeCheck[1];
+	}
+	switch (tempType) {
 		case "attack":
 		case "outer":
 		case "attack all":
@@ -2195,7 +2315,27 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 			target.redirectId=userId;
 			target.redirectIndex=userIndex;
 			break;
+		case "summon":
+			if (userId!=-2) {
+				console.log("BRUH!!!");
+			} else {
+				summonEnemy(summonType,pips,user.position);
+			}
+			break;
 	}
+}
+
+function summonEnemy(type,pips,position) {
+	for (var i in enemies) {
+		if (enemies[i].position>position) {
+			enemies[i].position+=pips;
+		}
+	}
+	for (var i=0; i<pips; i++) {
+		spawnEnemy(type,position+1+i);
+		console.log("added in "+(position+1+i));
+	}
+	reposition();
 }
 
 function validDice(id,index) {
@@ -2241,32 +2381,107 @@ function getDice(id,index) {
 	}
 }
 
-function hurt(target, pips) {
-	target.block-=pips;
-	if(target.block<0) {
+function getDiceList(id) {
+	if (!validDiceList(id)) {
+		console.log("HOW");
+		return false;
+	}
+	if (id==-2) {
+		return enemies;
+	} else if (id>=0) {
+		return dice[id];
+	} else {
+		return false;
+	}
+}
+
+function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipment
+	if (id==-3) {
+		return getDice(id,index).dice[side];
+	}
+	var tempUnit = structuredClone(getDice(id,index));
+	var tempDice = structuredClone(getDice(id,index).dice);
+	var originalSide = tempDice[side];
+	var tempFace = tempDice[side];
+	var equipment = tempUnit.equipment;
+	if (tempUnit.duplicate) {
+		tempFace = structuredClone(tempUnit.duplicateFace);
+	}
+	for (var i in equipment) {
+		switch (equipment[i]) {
+			case "longsword":
+				if (side==0||side==1||side==4||side==5) {
+					tempFace = ["attack",3,[]];
+				}
+				break;
+		}
+	}
+	var keywords = structuredClone(tempFace[2]);
+	for (var i in keywords) {
+		if (keywords[i]=="copycat") {
+			for (var j in focusKeywords) {
+				if (!keywords.includes(focusKeywords[j]))
+					{keywords.push(focusKeywords[j]);}
+			}
+		}
+	}
+	if (id>=0) {
+		for (var i in enemies) {
+			if (enemies[i].bramble) {
+				if (!keywords.includes("singleUse")) {
+					keywords.push("singleUse");
+				}
+				break;
+			}
+		}
+	}
+	tempFace[2] = keywords;
+	return tempFace;
+}
+
+function validDiceList(id) {
+	if (id==-2||(id>=0&&id<dice.length)) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+function hurt(target, pips,unblockable) {
+	var incoming = 0;
+	if (!unblockable) {
+		if (target.block>=pips) {
+			target.block-=pips;
+		} else {
+			incoming = pips-target.block;
+			target.block=0;
+		}
+	} else {
+		incoming = pips;
+	}
+	if(incoming>0) {
 		var iron = -1;
 		target.ironHp.sort();
 		if (target.ironHp.length>0) {
 			for (var i=target.ironHp.length-1; i>=0; i--) {
-				if (target.ironHp[i]<target.maxHp) {
+				if (target.ironHp[i]<=target.hp) {
 					iron = target.ironHp[i];
 					break;
 				}
 			}
 		}
 		if (iron==-1) {
-			target.hp+=target.block;
-			target.block=0;
+			target.hp-=incoming;
 		} else {
+			console.log("iron" + iron);
 			if (target.hp==iron) {
 				target.hp--;
 				target.ironHp.splice(target.ironHp.length-1,1);
-			} else if (target.hp+target.block<=iron) {
+			} else if (target.hp-incoming<=iron) {
 				target.hp=iron;
 			} else {
-				target.hp+=target.block;
+				target.hp-=incoming;
 			}
-			target.block=0;
 		}
 	}
 }
@@ -2299,29 +2514,30 @@ function updateText() {
 	for (var i in enemies) {
 		if (i>=enemyHpText.length) {
 			enemyHpText[i] = new PIXI.Text(enemies[i].hp);
-			enemyHpText[i].x=i*50;
-			enemyHpText[i].y=50;
-
 			app.stage.addChild(enemyHpText[i]);
 		}
+			enemyHpText[i].x=enemies[i].position*50;
+			enemyHpText[i].y=50;
+
+			
 		enemyHpText[i].alpha=1;
 		if (i>=enemyBlockText.length) {
 			enemyBlockText[i] = new PIXI.Text(enemies[i].block);
-			enemyBlockText[i].x=i*50;
+			app.stage.addChild(enemyBlockText[i]);
+		}
+			enemyBlockText[i].x=enemies[i].position*50;
 			enemyBlockText[i].y=75;
 			enemyBlockText[i].style.fill=0x888888;
 			enemyBlockText[i].alpha=0;
-			app.stage.addChild(enemyBlockText[i]);
-		}
 		var effectivePoison=enemies[i].poison-enemies[i].regen;
 		if (i>=enemyPoisonText.length) {
 			enemyPoisonText[i] = new PIXI.Text(effectivePoison);
-			enemyPoisonText[i].x=i*50+25;
+			app.stage.addChild(enemyPoisonText[i]);
+		}
+			enemyPoisonText[i].x=enemies[i].position*50+25;
 			enemyPoisonText[i].y=75;
 			enemyPoisonText[i].style.fill=0x008800;
 			enemyPoisonText[i].alpha=0;
-			app.stage.addChild(enemyPoisonText[i]);
-		}
 		enemyHpText[i].text=enemies[i].hp;
 		enemyBlockText[i].text=enemies[i].block;
 		enemyPoisonText[i].text=effectivePoison;
@@ -2352,7 +2568,6 @@ function processQueue() {
 		focusTargetId=-1;
 		focusTargetIndex=-1;
 		focusKeywords = [];
-		age=-1;
 	/*dice=[];
 	for (var i in initialDice) {
 		dice.push([]);
@@ -2362,13 +2577,14 @@ function processQueue() {
 	}*/
 	recoverDice();
 	recoverEnemies();
+
+	//process items?
+
 	/*enemies=[];
 	for (var i in enemies) {
 		enemies.push(structuredClone(initialEnemies[i]));
 	}*/
 	for (pee in actionQueue) {
-
-		age++;
 		var user = getDice(actionQueue[pee][0],actionQueue[pee][1]);
 		var target = getDice(actionQueue[pee][2],actionQueue[pee][3]);
 
@@ -2388,6 +2604,28 @@ function processQueue() {
 			user.rampage=false;
 		}
 		for (i in enemies) {
+			var goblinCheck = true;
+			if (enemies[i].goblin) {
+				for (j in enemies) {
+					if (i!=j&&!enemies[j].dead) {
+						goblinCheck = false;
+					}
+				}
+				if (goblinCheck) {
+					enemies[i].dead=true; //flee
+				}
+			}
+			if (enemies[i].militia) {
+				for (j in enemies[i].targets) {
+					var tempTarget = getDice(enemies[i].targets[j][0],enemies[i].targets[j][1]);
+					if (tempTarget.block>=5) {
+						enemies[i].dead=true; //flee
+					}
+				}
+			}
+		}
+		//checkDead();
+		for (i in enemies) {
 			if (enemies[i].dead) {
 				enemies[i].targets=[];
 			}
@@ -2397,22 +2635,22 @@ function processQueue() {
 		focusTargetIndex=actionQueue[pee][3];
 		focusKeywords=structuredClone(user.dice[user.side][2]);
 	}
-	for (var i in dice) {
+	/*for (var i in dice) {
 		for (var j in dice[i]) {
 			if (dice[i][j].hp<=0) {
 				dice[i][j].dead=true;
-			}/* else {
+			} else {
 				dice[i][j].dead=false;
-			}*/
+			}
 		}
 	}
 	for (var i in enemies) {
 		if (enemies[i].hp<=0) {
 			enemies[i].dead=true;
-		}/* else {
+		} else {
 			enemies[i].dead=false;
-		}*/
-	}
+		}
+	}*/
 }
 
 function calcIncoming() {
@@ -2466,7 +2704,7 @@ function calcIncoming() {
 							}
 						}*/
 						if (cleave||descend){
-							var upCounter = index-1;
+							/*var upCounter = index-1;
 							while (upCounter>=0&&cleave) {
 								[newId,nextUp]=getRedirectedTarget(id,upCounter);
 								if (!getDice(newId,nextUp).dead) {
@@ -2489,12 +2727,55 @@ function calcIncoming() {
 									break;
 								}
 								downCounter++;
+							}*/
+							var upper,lower;
+							[upper,lower]=cleaveIndices(id,index);
+							if (upper!=-1&&cleave) {
+								[newId,newIndex]=getRedirectedTarget(id,upper);
+								getDice(newId,newIndex).incoming+=pips;
+								if (poison) {
+									getDice(newId,newIndex).incomingPoison+=pips;
+								}
+							}
+							if (lower!=-1) {
+								[newId,newIndex] = getRedirectedTarget(id,lower);
+								if (!getDice(newId,newIndex).dead) {
+									getDice(newId,newIndex).incoming+=pips;
+									if (poison) {
+										getDice(newId,newIndex).incomingPoison+=pips;
+									}
+								}
 							}
 						}
 						break;
 				}
 		}
 	}
+}
+
+function getUnitByPosition(id,position) {
+	if (id==-2) {
+		for (var i in enemies) {
+			if (enemies[i].position==position) {
+				return i;
+			}
+		}
+	} else if (id>=0) {
+		for (var i in dice[id]) {
+			if (dice[id][i].position==position) {
+				return i;
+			}
+		}
+	}
+	return -1;
+}
+
+function reposition() {
+	for (var i in enemies) {
+		enemies[i].x=enemies[i].position*enemies[i].width;
+		enemies[i].y=0;
+	}
+	updateText();
 }
 
 function resolveAttacks() {
@@ -2505,19 +2786,28 @@ function resolveAttacks() {
 				action(enemies[i].dice,enemies[i].side,-2,i,enemies[i].targets[j][0],enemies[i].targets[j][1]);}
 			//action(enemies[i].dice[enemies[i].side][0],enemies[i].dice[enemies[i].side][1],enemies[i],enemies[i].targets[j]);
 		}
+		var tempFace = getFace(-2,i,enemies[i].side);
+		var typeCheck = tempFace[0].split(" ");
+		if (enemies[i].targets.length==0&&typeCheck[0]=="summon") {
+			action(enemies[i].dice,enemies[i].side,-2,i,-1,-1);
+		}
 	}
 	for (var i in enemies) {
 		enemies[i].targets=[];
+		if (enemies[i].caw) {
+			enemies[i].ranged=false;
+		}
 	}
 	/*for (var i in ownedDice) {
 		previousDice[i]=structuredClone(ownedDice[i]);
 	}*/
+	checkDead();
 	for (var i in dice) {
-		initialDice.push([]);
 		for (var j in dice[i]) {
-			if (dice[i][j].hp<=0) {
+			/*if (dice[i][j].hp<=0) {
 				dice[i][j].dead=true;
-			}
+			}*/
+			dice[i][j].duplicate = false;
 		}
 	}
 	backupDice();
@@ -2529,11 +2819,16 @@ function resolvePoison() {
 		for (var j in dice[i]) {
 			//dice[i][j].hp-=dice[i][j].poison;
 			//dice[i][j].hp+=dice[i][j].regen;
-			var iron = -1;
+			if (dice[i][j].poison>dice[i][j].regen) {
+				hurt(dice[i][j],dice[i][j].poison-dice[i][j].regen,true);
+			} else {
+				dice[i][j].hp+=dice[i][j].regen-dice[i][j].poison;
+			}
+			/*var iron = -1;
 			dice[i][j].ironHp.sort();
 			if (dice[i][j].ironHp.length>0) {
 				for (var k=dice[i][j].ironHp.length-1; k>=0; k--) {
-					if (dice[i][j].ironHp[k]<dice[i][j].maxHp) {
+					if (dice[i][j].ironHp[k]<=dice[i][j].hp) {
 						iron = dice[i][j].ironHp[k];
 						break;
 					}
@@ -2550,7 +2845,7 @@ function resolvePoison() {
 				} else {
 					dice[i][j].hp-=dice[i][j].poison-dice[i][j].regen;
 				}
-			}
+			}*/
 			dice[i][j].hp=Math.min(dice[i][j].hp,dice[i][j].maxHp);
 		}
 	}
@@ -2583,19 +2878,43 @@ function resolvePoison() {
 		enemies[i].hp=Math.min(enemies[i].hp,enemies[i].maxHp);
 	}
 }
+function kill(id,index) {
+	var tempUnit = getDice(id,index);
+	tempUnit.dead=true;
+	if (tempUnit.bones) {
+		//bones shit
+		var upper,lower;
+		[upper,lower] = cleaveIndices(id,index);
+
+		var [upperTargetId,upperTargetIndex] = getRedirectedTarget(id,upper);
+		var [lowerTargetId,lowerTargetIndex] = getRedirectedTarget(id,lower);
+
+		hurt(getDice(upperTargetId,upperTargetIndex),1);
+		hurt(getDice(lowerTargetId,lowerTargetIndex),1);
+
+		console.log("bones!!! " + upperTargetId + " " + upperTargetIndex);
+		checkDead();
+	}
+}
 function checkDead() {
+	var lethal = false;
 	for (var i in dice) {
 		for (var j in dice[i]) {
-			if (dice[i][j].hp<=0) {
-				dice[i][j].dead=true;
+			if (dice[i][j].hp<=0&&!dice[i][j].dead) {
+				kill(i,j);
+				lethal = true;
+				//dice[i][j].dead=true;
 			}
 		}
 	}
 	for (var i in enemies) {
-		if (enemies[i].hp<=0) {
-			enemies[i].dead=true;
+		if (enemies[i].hp<=0&&!enemies[i].dead) {
+			kill(-2,i);
+			lethal = true;
+			//enemies[i].dead=true;
 		}
 	}
+	return lethal;
 }
 function removeBlock() {
 	for (var i in dice) {
@@ -2610,10 +2929,10 @@ function removeBlock() {
 function backupDice() {
 	for (var i in initialDice) {
 		for (var j in initialDice[i]) {
-			if (dice[i][j].duplicate) {
+			/*if (dice[i][j].duplicate) {
 				console.log("ummm");
 				dice[i][j].dice=structuredClone(initialDice[i][j].dice);
-			}
+			}*/
 		}
 	}
 	initialDice=[];
@@ -2665,25 +2984,40 @@ var actionInfo = {
 	"reuse": "can use a dice again",
 	"redirect": "makes actions targetting that unit target this unit instead",
 };
+var enemyInfo = {
+
+}
 function setInfo() {
 	document.getElementById("info").innerHTML="";
 	if (hoveringId==-2||hoveringId>=0) {
 		var tempUnit = getDice(hoveringId,hoveringIndex);
-		var type = tempUnit.dice[tempUnit.side][0];
-		document.getElementById("info").innerHTML+=type+": "+actionInfo[type];
-		for (var i in tempUnit.dice[tempUnit.side][2]) {
-			var keyword = tempUnit.dice[tempUnit.side][2][i];
-			document.getElementById("info").innerHTML+="<br />";
+		var tempFace = getFace(hoveringId,hoveringIndex,tempUnit.side);
+		var type = tempFace[0];
+		document.getElementById("info").innerHTML+=type+": "+actionInfo[type]+"<br />";
+		for (var i in tempFace[2]) {
+			var keyword = tempFace[2][i];
 			document.getElementById("info").innerHTML+=keyword+": "+keywordInfo[keyword];
+			document.getElementById("info").innerHTML+="<br />";
 		}
+		if (tempUnit.ranged) {
+			document.getElementById("info").innerHTML+="can only be targetted by ranged or if nonranged are killed!<br />";
+		}
+		if (tempUnit.goblin) {
+			document.getElementById("info").innerHTML+="flees if alone<br />";
+		}
+		if (tempUnit.thorns>0) {
+			document.getElementById("info").innerHTML+="damages attacker by "+tempUnit.thorns+"<br />";
+		}
+		
 	} else if (hoveringId==-4) {
 		if (selectedId==-3||selectedId==-2||selectedId>=0) {
 			var tempDice = getDice(selectedId,selectedIndex).dice;
 			var tempSide = hoveringIndex;
-			var type = tempDice[tempSide][0];
+			var tempFace = getFace(selectedId,selectedIndex,tempSide);
+			var type = tempFace[0];
 			document.getElementById("info").innerHTML+=type+": "+actionInfo[type];
-			for (var i in tempDice[tempSide][2]) {
-				var keyword = tempDice[tempSide][2][i];
+			for (var i in tempFace[2]) {
+				var keyword = tempFace[2][i];
 				document.getElementById("info").innerHTML+="<br />";
 				document.getElementById("info").innerHTML+=keyword+": "+keywordInfo[keyword];
 			}
@@ -2700,11 +3034,12 @@ var yellows=[["fighter","ruffian","lazy","brigand","hoarder"],["scrapper","brute
 var yellowTracker=structuredClone(yellows);
 var greys=[["defender","buckle","squire"],["warden"],["gigadefender"]];
 var greyTracker=structuredClone(greys);
+var upgradeSent = false;
 function gameLoop(delta){
 	switch(gameState) {
 		case "waiting":
 			if (ready) {
-				socket.emit("ready");
+				//socket.emit("ready");
 			}
 			break;
 		case "ingame":
@@ -2726,10 +3061,11 @@ function gameLoop(delta){
 						allEnemiesDead=false;
 					}
 				}
-				if (allEnemiesDead) {
+				if (allEnemiesDead&!upgradeSent) {
 					socket.emit("reset enemy");
 					socket.emit("send","heal all");
 					socket.emit("send","upgrade");
+					upgradeSent = true;
 				}
 			}
 			updateText();
@@ -2898,6 +3234,12 @@ function render() {
 			var pips = dice[i][j].dice[dice[i][j].side][1];
 			var originalPips = dice[i][j].dice[dice[i][j].side][1];
 			var keywords = dice[i][j].dice[dice[i][j].side][2];
+
+			face=getFace(i,j,dice[i][j].side);
+			type = face[0];
+			pips = face[1];
+			originalPips = face[1];
+			keywords = face[2];
 			/*if (dice[i][j].duplicate[0]!=0) {
 				face = dice[i][j].duplicate;
 				pips = dice[i][j].duplicate[1];
@@ -2959,12 +3301,12 @@ function render() {
 			}
 
 			if (!exert) {
-				drawFace(face,dice[i][j].x,dice[i][j].y);
+				drawFace(face,dice[i][j].x,dice[i][j].y,i,j);
 			} else {
 				g.drawRect(dice[i][j].x,dice[i][j].y,dice[i][j].width,dice[i][j].height);
 			}
 			drawHealthBar(dice[i][j].x,dice[i][j].y,dice[i][j].hp,dice[i][j].maxHp,dice[i][j].ironHp);
-			drawPips(pips,dice[i][j].x,dice[i][j].y,originalPips);
+			//drawPips(pips,dice[i][j].x,dice[i][j].y,originalPips);
 			/*switch(dice[i][j].dice[dice[i][j].side][0]) {
 				case "attack":
 					g.beginFill(0xFF0000);
@@ -3014,11 +3356,21 @@ function render() {
 				g.beginFill(0x777777);
 			}
 		}
+		if (enemies[i].ranged) {
+			g.beginFill(0xBBBBBB);
+		}
 		if (enemies[i].dead) {
 			g.beginFill(0x880000);
 		}
 		//g.drawRect(i*50,100,50,50);
-		drawFace(enemies[i].dice[enemies[i].side],enemies[i].x,enemies[i].y);
+		face=getFace(-2,i,enemies[i].side);
+			type = face[0];
+			pips = face[1];
+			originalPips = face[1];
+			keywords = face[2];
+			pips = getPips(type,pips,keywords,enemies[i]);
+		//drawFace(enemies[i].dice[enemies[i].side],enemies[i].x,enemies[i].y);
+		drawFace(face,enemies[i].x,enemies[i].y,-2,i);
 		drawHealthBar(enemies[i].x,enemies[i].y,enemies[i].hp,enemies[i].maxHp,enemies[i].ironHp);
 
 		//drawPips(enemies[i].dice[enemies[i].side][1],enemies[i].x,enemies[i].y);
@@ -3054,9 +3406,11 @@ function render() {
 			}*/
 			var id = enemies[i].targets[j][0];
 			var index = enemies[i].targets[j][1];
-			if (cleave){
-				var nextUp = index-1;
-				while (nextUp>=0&&cleave) {
+			var pos = getDice(id,index).position;
+			if (cleave||descend){
+				/*var nextUpPos = pos-1;
+				while (nextUpPos>=0&&cleave) {
+					var nextUp = getUnitByPosition(nextUpPos);
 					if (!getDice(id,nextUp).dead) {
 						g.moveTo(enemies[i].x+enemies[i].width/2,enemies[i].y+enemies[i].height);
 						[targetId,targetIndex] = getRedirectedTarget(id,nextUp);
@@ -3064,10 +3418,11 @@ function render() {
 						g.lineTo(tempDice.x+tempDice.width/2,tempDice.y);
 						break;
 					}
-					nextUp--;
+					nextUpPos--;
 				}
-				var nextDown = index+1;
-				while (nextDown<=dice[id].length-1) {
+				var nextDownPos = pos+1;
+				while (nextDownPos<=dice[id].length-1) {
+					var nextDown = getUnitByPosition(nextDownPos);
 					if (!getDice(id,nextDown).dead) {
 						g.moveTo(enemies[i].x+enemies[i].width/2,enemies[i].y+enemies[i].height);
 						[targetId,targetIndex] = getRedirectedTarget(id,nextDown);
@@ -3076,8 +3431,24 @@ function render() {
 						g.lineTo(tempDice.x+tempDice.width/2,tempDice.y);
 						break;
 					}
-					nextDown++;
+					nextDownPos++;
+				}*/
+				var upper,lower;
+				[upper,lower]=cleaveIndices(id,index);
+				if (upper!=-1&&cleave) {
+					g.moveTo(enemies[i].x+enemies[i].width/2,enemies[i].y+enemies[i].height);
+					[targetId,targetIndex] = getRedirectedTarget(id,upper);
+					var tempDice = getDice(targetId,targetIndex);
+					g.lineTo(tempDice.x+tempDice.width/2,tempDice.y);
 				}
+				if (lower!=-1) {
+					g.moveTo(enemies[i].x+enemies[i].width/2,enemies[i].y+enemies[i].height);
+					[targetId,targetIndex] = getRedirectedTarget(id,lower);
+					
+					var tempDice = getDice(targetId,targetIndex);
+					g.lineTo(tempDice.x+tempDice.width/2,tempDice.y);
+				}
+
 			}
 			/*if (enemies[i].targets[j][0]==playerId) {
 				g.lineTo(ownedDice[enemies[i].targets[j][1]].x+25,50);
@@ -3123,6 +3494,40 @@ function render() {
 	g.lineStyle(2,0x000000);
 }
 
+function cleaveIndices(id, index) {
+	var tempList = getDiceList(id);
+	var pos = getDice(id,index).position;
+	var upper = -1;
+	var lower = -1;
+		var nextUpPos = pos-1;
+		while (nextUpPos>=0) {
+			var nextUp = getUnitByPosition(id,nextUpPos);
+			if (nextUp==-1) {
+				nextUpPos--;
+				continue;
+			}
+			if (!getDice(id,nextUp).dead) {
+				upper = nextUp;
+				break;
+			}
+			nextUpPos--;
+		}
+		var nextDownPos = pos+1;
+		while (nextDownPos<=tempList.length-1) {
+			var nextDown = getUnitByPosition(id,nextDownPos);
+			if (nextDown==-1) {
+				nextDownPos++;
+				continue;
+			}
+			if (!getDice(id,nextDown).dead) {
+				lower = nextDown;
+				break;
+			}
+			nextDownPos++;
+		}
+		return [upper,lower];
+}
+
 var upY=550;
 var netX=50;
 var netY=400;
@@ -3133,23 +3538,32 @@ function drawNet(id,index,x,y) {
 	}
 
 	var dice = getDice(id,index).dice;
+	var tempFaces = [];
+	for (var i=0; i<6; i++) {
+		tempFaces[i] = getFace(id,index,i);
+	}
 	g.beginFill(0xFFFFFF);
-	drawFace(dice[0],x,y+50);
+	drawFace(tempFaces[0],x,y+50,id,index);
 	g.beginFill(0xFFFFFF);
-	drawFace(dice[1],x+50,y+50);
+	drawFace(tempFaces[1],x+50,y+50,id,index);
 	g.beginFill(0xFFFFFF);
-	drawFace(dice[2],x+50,y);
+	drawFace(tempFaces[2],x+50,y,id,index);
 	g.beginFill(0xFFFFFF);
-	drawFace(dice[3],x+50,y+100);
+	drawFace(tempFaces[3],x+50,y+100,id,index);
 	g.beginFill(0xFFFFFF);
-	drawFace(dice[4],x+100,y+50);
+	drawFace(tempFaces[4],x+100,y+50,id,index);
 	g.beginFill(0xFFFFFF);
-	drawFace(dice[5],x+150,y+50);
+	drawFace(tempFaces[5],x+150,y+50,id,index);
 }
 
-function drawFace(face,x,y) {
+function drawFace(face,x,y,id,index) {
 	g.drawRect(x,y,50,50);
-	switch(face[0]) {
+	var typeCheck = face[0].split(" ");
+	var tempType = face[0];
+	if (typeCheck[0]=="summon") {
+		tempType = "summon";
+	}
+	switch(tempType) {
 		case "attack":
 			g.beginFill(0xFF0000);
 			g.drawRect(x+15,y+15,20,20);
@@ -3178,8 +3592,17 @@ function drawFace(face,x,y) {
 			g.beginFill(0x000000);
 			g.drawRect(x+15,y+15,20,20);
 			break;
+		case "summon":
+			g.beginFill(0x0000FF);
+			g.drawRect(x+15,y+15,20,20);
+			break;
 	}
-	drawPips(face[1],x,y);
+	var originalPips = face[1];
+	var pips = face[1];
+	if (id==-2||id>=0) {
+		pips = getPips(face[0],face[1],face[2],getDice(id,index));
+	}
+	drawPips(pips,x,y,originalPips);
 }
 
 function drawHealthBar(x,y,hp,maxHp,iron) {
