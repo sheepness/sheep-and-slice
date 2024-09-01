@@ -933,7 +933,7 @@ socket.on("start",()=> {
 	console.log("start");
 	readyText.alpha=0;
 	initDice();
-	gameState="inventory";
+	gameState="ingame";
 	age=0;
 	/*for (var i in enemies) {
 		enemyHpText[i] = new PIXI.Text(enemies[i].hp);
