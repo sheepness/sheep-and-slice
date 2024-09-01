@@ -16,6 +16,65 @@ var host=false;
 var ready = false;
 var rerolls=2;
 var round=1;
+
+var inventory=["wolf ears","leather vest"];
+socket.on("add to inventory", (item)=> {
+	if (gameState="equipment") {
+		inventory.push(item);
+	}
+});
+socket.on("equip",(id,index,itemIndex)=> {
+
+	if (gameState="inventory") {
+		getDice(id,index).equipment.push(inventory[itemIndex]);
+		inventory.splice(itemIndex,1);
+			processEquipment();
+			updateText();
+	}
+});
+function processEquipment() {
+	for (var i in dice)
+		for (var j in dice[i]) {
+
+			var tempEquipment = structuredClone(dice[i][j].equipment);
+			resetDie(i,j);
+			dice[i][j].equipment=tempEquipment;
+			for (var k in dice[i][j].equipment) {
+				switch (dice[i][j].equipment[k]) {
+					case "leather vest":
+						dice[i][j].maxHp++;
+						dice[i][j].hp++;
+						break;
+					case "wolf ears":
+						dice[i][j].maxHp=6;
+						dice[i][j].hp=6;
+						break;
+			}
+			adjustDeathHp(i,j);
+			for (var k in dice[i][j].equipment) {
+				switch (dice[i][j].equipment[k]) {
+					case "scar":
+						dice[i][j].maxHp+=5;
+						break;
+				}
+			}
+		}
+	}
+}
+socket.on("unequip",(id,index,itemIndex)=> {
+	if (gameState=="inventory") {
+		inventory.push(getDice(id,index).equipment[itemIndex]);
+		getDice(id,index).equipment.splice(itemIndex,1);
+	processEquipment();
+	updateText();
+	}
+	
+});
+function unequip(index) {
+	for (var i in getDice(playerId,index).equipment) {
+		socket.emit("unequip",playerId,index,0);
+	}
+}
 socket.on("action",(userId,userIndex,targetId,targetIndex) => {
 	if (gameState=="ingame") {
 		var user = getDice(userId,userIndex);
@@ -510,8 +569,10 @@ function spawnEnemy(enemy,pos) {
 	}
 
 	temp.name=enemy;
-	temp.position=pos;
+	temp.position=parseInt(pos);
 	enemies.push(temp);
+	console.log(enemies.length);
+	updateText();
 }
 
 function spawnFight() {
@@ -527,6 +588,7 @@ function spawnFight() {
 		socket.emit("spawn","wisp");
 		socket.emit("spawn","wisp");
 	}
+	//socket.emit("send","update text");
 }
 var playerText = [];
 socket.on("ready",(num) => {
@@ -538,11 +600,11 @@ socket.on("ready",(num) => {
 		playerText.push(new PIXI.Text("Player "+(i+1)));
 		if (i==playerId) {
 			playerText[i].text+=" (you)";
-			playerText[i].x=250;
-			playerText[i].y=100;
+			playerText[i].x=5*50;
+			playerText[i].y=2*50;
 		} else {
-			playerText[i].x=650;
-			playerText[i].y=100+100*i-100*(i>playerId);
+			playerText[i].x=13*50;
+			playerText[i].y=2*50+2*50*i-2*50*(i>playerId);
 		}
 		playerText[i].style.fontSize=20;
 		app.stage.addChild(playerText[i]);
@@ -566,18 +628,13 @@ socket.on("ready",(num) => {
 		socket.emit("start");
 	}
 });
-socket.on("upgrade ready",()=> {
-	for (var i in dice[playerId]) {
+socket.on("inventory ready",()=> {
+	/*for (var i in dice[playerId]) {
 		socket.emit("init dice",playerId,i,dice[playerId][i].name);
-	}
+	}*/
+	processEquipment();
 	if (host) {
-		socket.emit("reset enemy");
-		round++;
-		for (var i in dice) {
-			spawnFight();
-			//socket.emit("spawn","slimelet");
-			//socket.emit("spawn","slimelet");
-		}
+		
 		backupDice();
 		/*for (var i in dice) {
 			for (var j in dice[i]) {
@@ -585,6 +642,20 @@ socket.on("upgrade ready",()=> {
 			}
 		}*/
 		socket.emit("send","resume");
+	}
+});
+socket.on("upgrade ready",()=> {
+	upgradeTurn=false;
+	gameState = "inventory";
+	if (host) {
+		//idk
+	}
+})
+socket.on("equipment ready",()=> {
+	equipmentTurn=false;
+	gameState = "inventory";
+	if (host) {
+		//idk
 	}
 });
 socket.on("new client", (id)=> {
@@ -666,8 +737,42 @@ var diceTemplates={
 	};
 socket.on("init dice",(id,index,unit)=> {
 	console.log("init dice" + dice[id].length);
-	spawnDice(id,index,unit,dice[id].length);
+	spawnDice(id,index,unit,index);
 });
+function previouslyDied(id,index) {
+	for (var i in deadTracker) {
+		if (id==deadTracker[i][0]&&index==deadTracker[i][1]) {
+			return true;
+		}
+	}
+	return false;
+}
+function adjustDeathHp(id,index) {
+	if (previouslyDied(id,index)) {
+		dice[id][index].hp=Math.floor(dice[id][index].maxHp/2);
+	}
+}
+function resetDie(id, index) {
+	spawnDice(id,index,dice[id][index].name,dice[id][index].position);
+	for (var i in deadTracker) {
+		if (id==deadTracker[i][0]&&index==deadTracker[i][1]) {
+			dice[deadTracker[i][0]][deadTracker[i][1]].hp=Math.max(1,Math.floor(dice[deadTracker[i][0]][deadTracker[i][1]].maxHp/2));
+			break;
+		}
+	}
+}
+function resetDice() {
+	for (var i in dice) {
+		for (var j in dice[i]) {
+			resetDie(i,j);
+			//spawnDice(i,j,dice[i][j].name,dice[i][j].position);
+		}
+	}
+	/*for (var i in deadTracker) {
+		dice[deadTracker[i][0]][deadTracker[i][1]].hp=Math.max(1,Math.floor(dice[deadTracker[i][0]][deadTracker[i][1]].maxHp/2));
+		console.log("oof");
+	}*/
+}
 function spawnDice(id,index,unit,pos) {
 	var temp = structuredClone(template);
 	//temp.dice=structuredClone(diceTemplates[unit]).dice;
@@ -807,7 +912,7 @@ function spawnDice(id,index,unit,pos) {
 			break;
 	}
 	temp.dice=structuredClone(diceTemplates[unit]).dice;
-	temp.position=pos;
+	temp.position=parseInt(pos);
 	/*if (id==playerId) {
 		temp.x=index*50;
 	} else {
@@ -815,10 +920,10 @@ function spawnDice(id,index,unit,pos) {
 	}*/
 	if (id==playerId) {
 				temp.x=index*SQUARE;
-				temp.y=100;
+				temp.y=2*SQUARE;
 			} else {
 				temp.x=400+index*SQUARE;
-				temp.y=100+id*100-100*(id>playerId);
+				temp.y=2*50+id*2*50-2*50*(id>playerId);
 			}
 	temp.name=unit;
 	dice[id][index]=temp;
@@ -828,9 +933,9 @@ socket.on("start",()=> {
 	console.log("start");
 	readyText.alpha=0;
 	initDice();
-	gameState="ingame";
+	gameState="inventory";
 	age=0;
-	for (var i in enemies) {
+	/*for (var i in enemies) {
 		enemyHpText[i] = new PIXI.Text(enemies[i].hp);
 		enemyHpText[i].x=i*50;
 		enemyHpText[i].y=50;
@@ -843,7 +948,7 @@ socket.on("start",()=> {
 	enemyBlockText[i].style.fill=0x888888;
 	enemyBlockText[i].alpha=0;
 	app.stage.addChild(enemyBlockText[i]);
-	}
+	}*/
 	/*if (host) {
 		rollDice();
 	}*/
@@ -918,8 +1023,13 @@ socket.on("message",(id,msg)=> {
 })
 socket.on("send",(cmd)=> {
 	switch(cmd) {
+		case "update text":
+			updateText();
+			break;
 		case "revert":
-			
+			if (!playerTurn) {
+				break;
+			}
 			var allUnused = true;
 			for (var i in dice) {
 				for (var j in dice[i]) {
@@ -940,6 +1050,9 @@ socket.on("send",(cmd)=> {
 			}
 			break;
 		case "undo":
+			if (!playerTurn) {
+				break;
+			}
 			if (actionQueue.length>0) {
 				actionQueue.splice(actionQueue.length-1,1);
 				document.getElementById("history").innerHTML+="<b>Player "+culprit+":</b> ";
@@ -991,16 +1104,39 @@ socket.on("send",(cmd)=> {
 			}
 			break;
 		case "upgrade":
+			if (!host) {
+				round++;
+			}
 			gameState="upgrade";
+			processEquipment();
+			updateText();
 			for (var i in dice) {
 				for (var j in dice[i]) {
 					dice[i][j].used=false;
 					dice[i][j].locked=false;
 				}
 			}
+				upgradeSent = false;
 			actionQueue=[];
 			upgrades=[];
 			upgradeIndices=[];
+			
+			break;
+		case "equipment":
+			if (!host) {
+				round++;
+			}
+			gameState="equipment";
+			processEquipment();
+			updateText();
+			for (var i in dice) {
+				for (var j in dice[i]) {
+					dice[i][j].used=false;
+					dice[i][j].locked=false;
+				}
+			}
+				upgradeSent = false;
+			actionQueue=[];
 			break;
 		case "heal all":
 			for (var i in dice) {
@@ -1015,10 +1151,10 @@ socket.on("send",(cmd)=> {
 			}
 			break;
 		case "resume":
-			for (var i in deadTracker) {
+			/*for (var i in deadTracker) {
 				dice[deadTracker[i][0]][deadTracker[i][1]].hp=Math.max(1,Math.floor(dice[deadTracker[i][0]][deadTracker[i][1]].maxHp/2));
 				console.log("oof");
-			}
+			}*/
 			/*for (var i in enemies) {
 					enemyHpText[i] = new PIXI.Text(enemies[i].hp);
 					enemyHpText[i].x=i*50;
@@ -1033,11 +1169,16 @@ socket.on("send",(cmd)=> {
 				enemyBlockText[i].alpha=0;
 				app.stage.addChild(enemyBlockText[i]);
 			}*/
+
+			processEquipment();
 			deadTracker=[];
 			gameState="ingame";
+			
+			readyText.alpha=0;
+			readySent = false;
+			age=0;
 			playerTurn=false;
 			locked=false;
-				upgradeSent = false;
 			if (host) {
 				enemyTurn=true;
 			}
@@ -1100,13 +1241,13 @@ document.addEventListener('keypress', (event) => {
 });
 var readyText = new PIXI.Text("READY");
 readyText.x=0;
-readyText.y=350;
+readyText.y=7*50;
 readyText.alpha=0;
 app.stage.addChild(readyText);
 
 var lockedText = new PIXI.Text("LOCKED");
 lockedText.x=0;
-lockedText.y=350;
+lockedText.y=7*50;
 lockedText.alpha=0;
 app.stage.addChild(lockedText);
 
@@ -1162,10 +1303,30 @@ document.addEventListener('mousemove', (event) => {
 					break;
 				}
 			}
-	} else */if (gameState=="upgrade") {
+	} else */
+	if (gameState=="upgrade") {
 		for (var i in upgrades) {
 			if (x>50*i&&x<50*i+50&&y>upY&&y<upY+50) {
 				hoveringId = -3;
+				hoveringIndex = i;
+				break;
+			}
+		}
+	}
+	if (gameState=="equipment") {
+		for (var i in items) {
+			if (x>50*i&&x<50*i+50&&y>upY&&y<upY+50) {
+				hoveringId = -5;
+				hoveringIndex = i;
+				break;
+			}
+		}
+	}
+	if (gameState=="inventory") {
+		processInventoryCoords();
+		for (var i in inventory) {
+			if (pointInRect(x,y,inventoryCoords[i][0],inventoryCoords[i][1],SQUARE,SQUARE)) {
+				hoveringId = -6;
 				hoveringIndex = i;
 				break;
 			}
@@ -1185,6 +1346,7 @@ document.addEventListener('mousemove', (event) => {
 	} else {
 		if (selectedId>=0||selectedId==-3||selectedId==-2) {
 			var tempDice = getDice(selectedId,selectedIndex).dice;
+			var tempUnit = getDice(selectedId,selectedIndex);
 			var hoverSide = -1;
 			if (pointInRect(x,y,netX,netY+SQUARE,SQUARE,SQUARE)) {
 				hoverSide = 0;
@@ -1198,18 +1360,43 @@ document.addEventListener('mousemove', (event) => {
 				hoverSide = 4;
 			} else if (pointInRect(x,y,netX+SQUARE*3,netY+SQUARE,SQUARE,SQUARE)) {
 				hoverSide = 5;
+			} else if (pointInRect(x,y,netX+itemNetCoords[0][0],netY+itemNetCoords[0][1],SQUARE,SQUARE)) {
+				hoverSide = -2;
+			} else if (pointInRect(x,y,netX+itemNetCoords[1][0],netY+itemNetCoords[1][1],SQUARE,SQUARE)) {
+				hoverSide = -3;
 			}
-			if (hoverSide!=-1) {
+			if (hoverSide>-1) {
 
 				var tempFace = getFace(selectedId,selectedIndex,hoverSide);
 				document.getElementById("dice name").innerHTML=tempFace[0]+" "+tempFace[1];
 				for (var i in tempFace[2]) {
 					document.getElementById("dice name").innerHTML+=" "+tempFace[2][i];
 				}
-				hoveringId = -4;
-			hoveringIndex = hoverSide;
-			setInfo();
+				
+				hoveringId=-4;
+			} else if (selectedId>=0) {
+				if (hoverSide==-2) {
+					if (tempUnit.equipment.length>=1) {
+						document.getElementById("dice name").innerHTML=tempUnit.equipment[0];
+					}
+				} else if (hoverSide==-3) {
+					if (tempUnit.equipment.length>=2) {
+						document.getElementById("dice name").innerHTML=tempUnit.equipment[1];
+					}
+				}
+				if (hoverSide!=-1) {
+					hoveringId = -4;
+				}
 			}
+			hoveringIndex = hoverSide;
+			
+			setInfo();
+		} else if (hoveringId==-5) {
+			document.getElementById("dice name").innerHTML=items[hoveringIndex];
+			setInfo();
+		} else if (hoveringId==-6) {
+			document.getElementById("dice name").innerHTML=inventory[hoveringIndex];
+			setInfo();
 		}
 	}
 });
@@ -1241,28 +1428,6 @@ document.addEventListener('mouseup', (event) => {
 	}
 	if (playerTurn&&gameState=="ingame") {
 		if (locked) {
-			/*for (var i in ownedDice) {
-				if (x>ownedDice[i].x&&x<ownedDice[i].x+ownedDice[i].width&&y>ownedDice[i].y&&y<ownedDice[i].y+ownedDice[i].height) {
-					hover = i;
-					hoveringId = playerId;
-					hoveringIndex = i;
-					break;
-				}
-			}
-			for (var i in unownedDice) {
-				for (var j in unownedDice[i]) {
-					if (x>unownedDice[i][j].x&&x<unownedDice[i][j].x+unownedDice[i][j].width&&y>unownedDice[i][j].y&&y<unownedDice[i][j].y+unownedDice[i][j].height) {
-						//hover = i;
-						if (i<playerId) {
-							hoveringId = i;
-						} else {
-							hoveringId = i+1;
-						}
-						hoveringIndex = j;
-						break;
-					}
-				}
-			}*/
 			if (pointInRect(x,y,endButton.x,endButton.y,endButtonWidth,SQUARE)) {
 				socket.emit("culprit",playerId);
 				socket.emit("send","end turn");
@@ -1305,7 +1470,8 @@ document.addEventListener('mouseup', (event) => {
 						if (!getDice(hoveringId,hoveringIndex).dead) {
 							var tempDice = getDice(selectedId,selectedIndex);
 							var tempTarget = getDice(hoveringId,hoveringIndex);
-							var keywords = tempDice.dice[tempDice.side][2];
+							var tempFace = getFace(selectedId,selectedIndex,tempDice.side);
+							var keywords = tempFace[2];
 
 							var heavy = false;
 							var ranged = false;
@@ -1320,6 +1486,15 @@ document.addEventListener('mouseup', (event) => {
 								}
 							}
 
+							var rangedCheck = true;
+							var tempList = getDiceList(hoveringId);
+							if (tempTarget.ranged&&!ranged) {
+								for (var i in tempList) {
+									if (!tempList[i].ranged&&!tempList[i].dead) {
+										rangedCheck=false;
+									}
+								}
+							}
 							var heavyCheck = true;
 							if (heavy) {
 								if (hoveringId>=0) {
@@ -1336,7 +1511,7 @@ document.addEventListener('mouseup', (event) => {
 								} else if (hoveringId==-2) {
 									var highestHp=1;
 									for (var i in enemies) {
-										if (enemies[i].dead) {
+										if (enemies[i].dead||(enemies[i].ranged&&!ranged)) {
 											continue;
 										}
 										highestHp = Math.max(highestHp,enemies[i].hp);
@@ -1349,15 +1524,7 @@ document.addEventListener('mouseup', (event) => {
 								}
 							}
 
-							var rangedCheck = true;
-							var tempList = getDiceList(hoveringId);
-							if (tempTarget.ranged&&!ranged) {
-								for (var i in tempList) {
-									if (!tempList[i].ranged&&!tempList[i].dead) {
-										rangedCheck=false;
-									}
-								}
-							}
+							
 							if (heavyCheck&&rangedCheck) {
 								socket.emit("action",selectedId,selectedIndex,hoveringId,hoveringIndex);
 								if (tempTarget.caw) {
@@ -1382,12 +1549,6 @@ document.addEventListener('mouseup', (event) => {
 			} else {
 				selectedId=-1;
 				selectedIndex=-1;
-				/*for (var i in ownedDice) {
-					if (x>ownedDice[i].x&&x<ownedDice[i].x+ownedDice[i].width&&y>ownedDice[i].y&&y<ownedDice[i].y+ownedDice[i].height) {
-						ownedDice[i].locked=!ownedDice[i].locked;
-						break;
-					}
-				}*/
 				for (var i in dice[playerId]) {
 						if (x>dice[playerId][i].x&&x<dice[playerId][i].x+dice[playerId][i].width&&y>dice[playerId][i].y&&y<dice[playerId][i].y+dice[playerId][i].height) {
 							dice[playerId][i].locked=!dice[playerId][i].locked;
@@ -1426,30 +1587,88 @@ document.addEventListener('mouseup', (event) => {
 				}
 			}
 		}
-	} else if (upgradeTurn) {
-		if (hoveringId==-3) {
-			if (selectedId!=-3) {
-				selectedId=-3;
+	} else if (upgradeTurn||equipmentTurn) {
+		if (hoveringId==-3||hoveringId==-5) {
+			if (selectedId!=-3&&selectedId!=-5) {
+				if (upgradeTurn) {
+					selectedId=-3;
+				} else {
+					selectedId=-5;
+				}
 				selectedIndex=hoveringIndex;
 			} else {
-				if (selectedIndex==hoveringIndex) {
-					socket.emit("init dice",playerId,upgradeIndices[hoveringIndex],upgrades[hoveringIndex]);
-					upgradeTurn=false;
-					gameState="upgrade waiting";
-					selectedId=-1;
-					selectedIndex=-1;
-					socket.emit("upgrade ready");
-				} else if (hoveringIndex>=0) {
-					selectedIndex=hoveringIndex;
+				if (selectedId==-3) {
+					if (selectedIndex==hoveringIndex) {
+						unequip(upgradeIndices[hoveringIndex]);
+						socket.emit("init dice",playerId,upgradeIndices[hoveringIndex],upgrades[hoveringIndex]);
+						
+						gameState="upgrade waiting";
+						selectedId=-1;
+						selectedIndex=-1;
+						socket.emit("upgrade ready");
+					} else if (hoveringIndex>=0) {
+						selectedIndex=hoveringIndex;
+					} else {
+						selectedId=-1;
+						selectedIndex=-1;
+					}
 				} else {
-					selectedId=-1;
-					selectedIndex=-1;
+					if (selectedIndex==hoveringIndex) {
+						socket.emit("add to inventory",items[hoveringIndex]);
+						equipmentTurn=false;
+						gameState="equipment waiting";
+						selectedId=-1;
+						selectedIndex=-1;
+						socket.emit("equipment ready");
+					} else if (hoveringIndex>=0) {
+						selectedIndex=hoveringIndex;
+					} else {
+						selectedId=-1;
+						selectedIndex=-1;
+					}
 				}
 			}
 		}
-	}
-});
+	} else if (inventoryTurn) {
+		console.log(hoveringIndex);
+		if (selectedId==-6) {
+			if (hoveringId==playerId&&getDice(playerId,hoveringIndex).equipment.length<getDice(playerId,hoveringIndex).maxEquipment) {
+				socket.emit("equip",playerId,hoveringIndex,selectedIndex);
+			}
+			selectedId=-1;
+			selectedIndex=-1;
+		} else {
+			if (hoveringId==-6) {
+				selectedId=-6;
+				selectedIndex = hoveringIndex;
+			} else if (hoveringId==playerId) {
+				//unequip
+				if (event.button==0) {
+					unequip(hoveringIndex);
+				}
+			}
+		}
+		if (pointInRect(x,y,readyButton.x,readyButton.y,readyButtonWidth,SQUARE)) {
+				//ready = true;
 
+		console.log("im fucken ready");
+				if (!readySent) {
+					socket.emit("inventory ready");
+					readyText.alpha=1;
+					readySent=true;
+				}
+			}
+	}
+	if (event.button==2) {
+				selectedId=hoveringId;
+				selectedIndex=hoveringIndex;
+			}
+			if (hoveringId==-1) {
+				selectedId=-1;
+				selectedIndex=-1;
+			}
+});
+var readySent=false;
 
 
 var units = {
@@ -1499,13 +1718,13 @@ var rolledDice = [[0,0],[0,0],[0,0],[0,0],[0,0]];
 var yourTurn = false;
 var locked = false;
 
-var hpText = [0,0,0,0,0];
-var enemyHpText = [0,0];
+var hpText = [];
+var enemyHpText = [];
 var incomingText = [];
 var poisonText = [];
 
-var blockText = [0,0,0,0,0];
-var enemyBlockText = [0,0];
+var blockText = [];
+var enemyBlockText = [];
 var enemyPoisonText = [];
 
 var unownedDice = [];
@@ -1578,38 +1797,38 @@ function initDice() {
 			poisonText[i].push(new PIXI.Text(dice[i][j].poison));
 			if (i==playerId) {
 				hpText[i][j].x=j*50;
-				hpText[i][j].y=150;
+				hpText[i][j].y=3*50;
 
 				blockText[i][j].x=j*50;
-				blockText[i][j].y=175;
+				blockText[i][j].y=3.5*50;
 				blockText[i][j].style.fill=0x888888;
 				blockText[i][j].alpha=0;
 
-				incomingText[i][j].x=j*50+25;
-				incomingText[i][j].y=150;
+				incomingText[i][j].x=j*50+50/2;
+				incomingText[i][j].y=3*50;
 				incomingText[i][j].style.fill=0x888800;
 				incomingText[i][j].alpha=0;
 
-				poisonText[i][j].x=j*50+25;
-				poisonText[i][j].y=175;
+				poisonText[i][j].x=j*50+50/2;
+				poisonText[i][j].y=3.5*50;
 				poisonText[i][j].style.fill=0x008800;
 				poisonText[i][j].alpha=0;
 			} else {
-				hpText[i][j].x=400+j*50;
-				hpText[i][j].y=150+100*i-100*(i>playerId);
+				hpText[i][j].x=8*50+j*50;
+				hpText[i][j].y=3*50+2*50*i-2*50*(i>playerId);
 
-				blockText[i][j].x=400+j*50;
-				blockText[i][j].y=175+100*i-100*(i>playerId);
+				blockText[i][j].x=8*50+j*50;
+				blockText[i][j].y=3.5*50+2*50*i-2*50*(i>playerId);
 				blockText[i][j].style.fill=0x888888;
 				blockText[i][j].alpha=0;
 
-				incomingText[i][j].x=j*50+425;
-				incomingText[i][j].y=150+100*i-100*(i>playerId);
+				incomingText[i][j].x=j*50+8.5*50;
+				incomingText[i][j].y=3*50+2*50*i-2*50*(i>playerId);
 				incomingText[i][j].style.fill=0x888800;
 				incomingText[i][j].alpha=0;
 
-				poisonText[i][j].x=j*50+425;
-				poisonText[i][j].y=175+100*i-100*(i>playerId);
+				poisonText[i][j].x=j*50+8.5*50;
+				poisonText[i][j].y=3.5*50+2*50*i-2*50*(i>playerId);
 				poisonText[i][j].style.fill=0x888800;
 				poisonText[i][j].alpha=0;
 			}
@@ -1654,7 +1873,7 @@ function initEnemies(en) {
 			default:
 		}
 	enemy.x=i*enemy.width;
-	enemy.y=150;
+	enemy.y=3*50;
 	enemies.push(enemy);
 	}
 	for (var i in enemyHpText) {
@@ -2339,7 +2558,7 @@ function summonEnemy(type,pips,position) {
 }
 
 function validDice(id,index) {
-	if (id==-1||id==-4) {
+	if (id!=-3&&id!=-2&&id<0) {
 		return false;
 	}
 	if (id==-3) {
@@ -2413,6 +2632,22 @@ function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipm
 				if (side==0||side==1||side==4||side==5) {
 					tempFace = ["attack",3,[]];
 				}
+				break;
+			case "doom blade":
+				if (tempFace[0]=="nothing") {
+					tempFace = ["attack",3,["death"]];
+				}
+				break;
+			case "ballet shoes":
+				if (side==0) {
+					tempFace = tempDice[5];
+				}
+				if (side==5) {
+					tempFace = tempDice[0];
+				}
+				break;
+			case "eye of horus":
+				tempFace[1]++;
 				break;
 		}
 	}
@@ -2526,7 +2761,7 @@ function updateText() {
 			app.stage.addChild(enemyBlockText[i]);
 		}
 			enemyBlockText[i].x=enemies[i].position*50;
-			enemyBlockText[i].y=75;
+			enemyBlockText[i].y=1.5*50;
 			enemyBlockText[i].style.fill=0x888888;
 			enemyBlockText[i].alpha=0;
 		var effectivePoison=enemies[i].poison-enemies[i].regen;
@@ -2534,8 +2769,8 @@ function updateText() {
 			enemyPoisonText[i] = new PIXI.Text(effectivePoison);
 			app.stage.addChild(enemyPoisonText[i]);
 		}
-			enemyPoisonText[i].x=enemies[i].position*50+25;
-			enemyPoisonText[i].y=75;
+			enemyPoisonText[i].x=enemies[i].position*50+50/2;
+			enemyPoisonText[i].y=1.5*50;
 			enemyPoisonText[i].style.fill=0x008800;
 			enemyPoisonText[i].alpha=0;
 		enemyHpText[i].text=enemies[i].hp;
@@ -2788,7 +3023,7 @@ function resolveAttacks() {
 		}
 		var tempFace = getFace(-2,i,enemies[i].side);
 		var typeCheck = tempFace[0].split(" ");
-		if (enemies[i].targets.length==0&&typeCheck[0]=="summon") {
+		if (enemies[i].targets.length==0&&typeCheck[0]=="summon"&&!enemies[i].dead) {
 			action(enemies[i].dice,enemies[i].side,-2,i,-1,-1);
 		}
 	}
@@ -2984,9 +3219,13 @@ var actionInfo = {
 	"reuse": "can use a dice again",
 	"redirect": "makes actions targetting that unit target this unit instead",
 };
-var enemyInfo = {
-
-}
+var equipmentInfo = {
+	"wolf ears": "set max hp to 6",
+	"leather vest": "increase max hp by 1",
+	"scar": "increase max hp by 5 empty hp",
+	"doom blade": "replace blanks with attack 3 death",
+	"ballet shoes": "swap left and rightmost faces"
+};
 function setInfo() {
 	document.getElementById("info").innerHTML="";
 	if (hoveringId==-2||hoveringId>=0) {
@@ -3011,24 +3250,41 @@ function setInfo() {
 		
 	} else if (hoveringId==-4) {
 		if (selectedId==-3||selectedId==-2||selectedId>=0) {
+			var tempUnit = getDice(selectedId,selectedIndex);
 			var tempDice = getDice(selectedId,selectedIndex).dice;
 			var tempSide = hoveringIndex;
-			var tempFace = getFace(selectedId,selectedIndex,tempSide);
-			var type = tempFace[0];
-			document.getElementById("info").innerHTML+=type+": "+actionInfo[type];
-			for (var i in tempFace[2]) {
-				var keyword = tempFace[2][i];
-				document.getElementById("info").innerHTML+="<br />";
-				document.getElementById("info").innerHTML+=keyword+": "+keywordInfo[keyword];
+			if (tempSide>-1) {
+				var tempFace = getFace(selectedId,selectedIndex,tempSide);
+				var type = tempFace[0];
+				document.getElementById("info").innerHTML+=type+": "+actionInfo[type];
+				for (var i in tempFace[2]) {
+					var keyword = tempFace[2][i];
+					document.getElementById("info").innerHTML+="<br />";
+					document.getElementById("info").innerHTML+=keyword+": "+keywordInfo[keyword];
+				}
+			} else if (selectedId>=0) {
+				if (tempSide==-2) {
+					document.getElementById("info").innerHTML+=equipmentInfo[tempUnit.equipment[0]];
+				} else if (tempSide==-3) {
+					document.getElementById("info").innerHTML+=equipmentInfo[tempUnit.equipment[1]];
+				}
 			}
 		}
+	}else if (hoveringId==-5) {
+		document.getElementById("info").innerHTML+=equipmentInfo[items[hoveringIndex]];
+	} else if (hoveringId==-6) {
+		document.getElementById("info").innerHTML+=equipmentInfo[inventory[hoveringIndex]];
 	}
 }
 var enemyTurn=true;
 var upgradeTurn=false;
+var equipmentTurn=false;
+var inventoryTurn = false;
 var upgrades=[];
 var upgradeIndices=[];
 var upgradeCount=2;
+var items=[];
+var itemCount=2;
 var yellows=[["fighter","ruffian","lazy","brigand","hoarder"],["scrapper","brute","berserker","sinew","collector","gladiator","whirl","soldier"],
 		["wanderer","brawler","curator","barbarian","captain","bash","leader","eccentric","veteran"]];
 var yellowTracker=structuredClone(yellows);
@@ -3064,8 +3320,20 @@ function gameLoop(delta){
 				if (allEnemiesDead&!upgradeSent) {
 					socket.emit("reset enemy");
 					socket.emit("send","heal all");
-					socket.emit("send","upgrade");
 					upgradeSent = true;
+					round++;
+					for (var i in dice) {
+						spawnFight();
+						//socket.emit("spawn","slimelet");
+						//socket.emit("spawn","slimelet");
+					}
+					if ((round-1)%2==1) {
+						socket.emit("send","upgrade");
+					} else {
+						socket.emit("send","equipment");
+					}
+		
+					//upgradeSent = true;
 				}
 			}
 			updateText();
@@ -3116,9 +3384,38 @@ function gameLoop(delta){
 				}
 				upgradeTurn=true;
 			}
+			break;
+		case "equipment":
+			if (!equipmentTurn) {
+				var tier = Math.ceil((round-1)/4);
+
+				equipmentTracker = structuredClone(equipmentList[tier-1]);
+				var item = "uhh";
+
+				if (tier<=equipmentList.length) {
+					for (var i=0; i<itemCount; i++) {
+						if (equipmentTracker[tier-1].length>0) {
+							var idx = Math.floor(Math.random()*equipmentTracker.length);
+							item = equipmentTracker[idx];
+							items.push(item);
+							equipmentTracker.splice(idx,1);
+						}
+					}
+				}
+				equipmentTurn=true;
+			}
+			break;
+		case "inventory":
+			if (!inventoryTurn) {
+				inventoryTurn=true;
+			}
+			break;
 	}
 	render();
 }
+
+var equipmentList = [["ballet shoes","doom blade","scar","wolf ears"],["polearm","ace of spades","wandify"],["enchanted shield"],["flawed diamond"],["longsword"]]
+var equipmentTracker = [];
 
 var rerollText = new PIXI.Text(0);
 rerollText.x=0;
@@ -3170,6 +3467,12 @@ function render() {
 	if (gameState=="waiting") {
 		readyButton.alpha=1;
 		g.drawRect(readyButton.x-10,readyButton.y-10,readyButtonWidth,SQUARE);
+		for (i in enemyHpText) {
+			enemyHpText[i].alpha=0;
+		}
+		for (i in enemyBlockText) {
+			enemyBlockText[i].alpha=0;
+		}
 	} else if (gameState=="ingame") {
 		readyButton.alpha=0;
 		if (!locked) {
@@ -3191,6 +3494,14 @@ function render() {
 			g.drawRect(unlockButton.x-10,unlockButton.y-10,unlockButtonWidth,SQUARE);
 			g.drawRect(undoButton.x-10,undoButton.y-10,undoButtonWidth,SQUARE);
 		}
+	} else if (gameState=="inventory") {
+		readyButton.alpha=1;
+		g.drawRect(readyButton.x-10,readyButton.y-10,readyButtonWidth,SQUARE);
+		rerollButton.alpha=0;
+			lockButton.alpha=0;
+			endButton.alpha=0;
+			unlockButton.alpha=0;
+			undoButton.alpha=0;
 	} else {
 		readyButton.alpha=0;
 		rerollButton.alpha=0;
@@ -3198,134 +3509,131 @@ function render() {
 			endButton.alpha=0;
 			unlockButton.alpha=0;
 			undoButton.alpha=0;
-		for (i in enemyHpText) {
-			enemyHpText[i].alpha=0;
-		}
-		for (i in enemyBlockText) {
-			enemyBlockText[i].alpha=0;
-		}
+		
 	}
-	if (gameState == "ingame"||gameState=="upgrade") {
-	for (var i in dice) {
-		for (var j in dice[i]) {
-			g.beginFill(0xFFFFFF);
-			if(locked) {
-				if (i==selectedId&&j==selectedIndex) {
-					g.beginFill(0x777777);
-				}
-			}
-			if (i==playerId) {
-				if (!locked) {
-					if (dice[i][j].locked) {
-						g.beginFill(0xAAAAFF);
-					}
-				}
-			}
+	//if (gameState == "ingame"||gameState=="upgrade") {
+		for (var i in dice) {
+			for (var j in dice[i]) {
 
-			if (dice[i][j].dead) {
-				g.beginFill(0x880000);
-			} else if (dice[i][j].used) {
-				g.beginFill(0xBBBBBB);
-			}
-			
-			//g.drawRect(dice[i][j].x,dice[i][j].y,dice[i][j].width,dice[i][j].height);
-			var face = dice[i][j].dice[dice[i][j].side];
-			var type = dice[i][j].dice[dice[i][j].side][0];
-			var pips = dice[i][j].dice[dice[i][j].side][1];
-			var originalPips = dice[i][j].dice[dice[i][j].side][1];
-			var keywords = dice[i][j].dice[dice[i][j].side][2];
+				g.lineStyle(2,0x000000);
+				g.beginFill(0xFFFFFF);
+				//if(locked) {
+					if (i==selectedId&&j==selectedIndex) {
+						g.beginFill(0x777777);
+					}
+				//}
+				if (i==playerId) {
+					if (!locked) {
+						if (dice[i][j].locked) {
+							g.beginFill(0xAAAAFF);
+						}
+					}
+				}
 
-			face=getFace(i,j,dice[i][j].side);
-			type = face[0];
-			pips = face[1];
-			originalPips = face[1];
-			keywords = face[2];
-			/*if (dice[i][j].duplicate[0]!=0) {
-				face = dice[i][j].duplicate;
-				pips = dice[i][j].duplicate[1];
-				keywords = structuredClone(dice[i][j].duplicate[2]);
-			}*/
-			var pristine = false;
-			var deathwish = false;
-			var steel = false;
-			var defy = false;
-			var exert=false;
-			var bloodlust = false;
-			for (var k in keywords) {
-				switch (keywords[k]) {
-					case "pristine":
-						pristine=true;
-						break;
-					case "deathwish":
-						deathwish=true;
-						break;
-					case "steel":
-						steel=true;
-						break;
-					case "defy":
-						defy=true;
-						break;
-					case "bloodlust":
-						bloodlust=true;
-						break;
+				if (dice[i][j].dead) {
+					g.beginFill(0x880000);
+				} else if (dice[i][j].used) {
+					g.beginFill(0xBBBBBB);
 				}
-			}
-			/*pips+=dice[i][j].keywordModifiers[dice[i][j].side];
-			if (steel) {
-				pips+=dice[i][j].block;
-			}
-			if (defy) {
-				pips+=Math.max(0,dice[i][j].incoming-dice[i][j].block);
-			}
-			if (bloodlust) {
-				for (i in enemies[i]) {
-					if (enemies[i].hp<enemies[i].maxHp) {
-						pips++;
-					}
-				}
-			}
-			if (pristine) {
-				if (dice[i][j].hp==dice[i][j].maxHp) {
-					pips*=2;
-				}
-			}
-			if (deathwish) {
-				if (checkDying(dice[i][j])) {
-					pips*=2;
-				}
-			}*/
-			pips = getPips(type,pips,keywords,dice[i][j]);
-			if (dice[i][j].exert>0||dice[i][j].singleUse[dice[i][j].side]) {
-				pips=0;
-				exert=true;
-			}
+				
+				//g.drawRect(dice[i][j].x,dice[i][j].y,dice[i][j].width,dice[i][j].height);
+				var face = dice[i][j].dice[dice[i][j].side];
+				var type = dice[i][j].dice[dice[i][j].side][0];
+				var pips = dice[i][j].dice[dice[i][j].side][1];
+				var originalPips = dice[i][j].dice[dice[i][j].side][1];
+				var keywords = dice[i][j].dice[dice[i][j].side][2];
 
-			if (!exert) {
-				drawFace(face,dice[i][j].x,dice[i][j].y,i,j);
-			} else {
-				g.drawRect(dice[i][j].x,dice[i][j].y,dice[i][j].width,dice[i][j].height);
+				face=getFace(i,j,dice[i][j].side);
+				type = face[0];
+				pips = face[1];
+				originalPips = face[1];
+				keywords = face[2];
+				/*if (dice[i][j].duplicate[0]!=0) {
+					face = dice[i][j].duplicate;
+					pips = dice[i][j].duplicate[1];
+					keywords = structuredClone(dice[i][j].duplicate[2]);
+				}*/
+				var pristine = false;
+				var deathwish = false;
+				var steel = false;
+				var defy = false;
+				var exert=false;
+				var bloodlust = false;
+				for (var k in keywords) {
+					switch (keywords[k]) {
+						case "pristine":
+							pristine=true;
+							break;
+						case "deathwish":
+							deathwish=true;
+							break;
+						case "steel":
+							steel=true;
+							break;
+						case "defy":
+							defy=true;
+							break;
+						case "bloodlust":
+							bloodlust=true;
+							break;
+					}
+				}
+				/*pips+=dice[i][j].keywordModifiers[dice[i][j].side];
+				if (steel) {
+					pips+=dice[i][j].block;
+				}
+				if (defy) {
+					pips+=Math.max(0,dice[i][j].incoming-dice[i][j].block);
+				}
+				if (bloodlust) {
+					for (i in enemies[i]) {
+						if (enemies[i].hp<enemies[i].maxHp) {
+							pips++;
+						}
+					}
+				}
+				if (pristine) {
+					if (dice[i][j].hp==dice[i][j].maxHp) {
+						pips*=2;
+					}
+				}
+				if (deathwish) {
+					if (checkDying(dice[i][j])) {
+						pips*=2;
+					}
+				}*/
+				pips = getPips(type,pips,keywords,dice[i][j]);
+				if (dice[i][j].exert>0||dice[i][j].singleUse[dice[i][j].side]) {
+					pips=0;
+					exert=true;
+				}
+				setTargetBorder(i,j);
+				if (!exert) {
+					drawFace(face,dice[i][j].x,dice[i][j].y,i,j);
+				} else {
+					g.drawRect(dice[i][j].x,dice[i][j].y,dice[i][j].width,dice[i][j].height);
+				}
+				drawHealthBar(dice[i][j].x,dice[i][j].y,dice[i][j].hp,dice[i][j].maxHp,dice[i][j].ironHp);
+				//drawPips(pips,dice[i][j].x,dice[i][j].y,originalPips);
+				/*switch(dice[i][j].dice[dice[i][j].side][0]) {
+					case "attack":
+						g.beginFill(0xFF0000);
+						if (pristine) {
+							g.beginFill(0x00FFFF);
+						}
+						g.drawRect(dice[i][j].x+15,dice[i][j].y+15,20,20);
+						break;
+					case "defend":
+						g.beginFill(0x999999);
+						if (pristine) {
+							g.beginFill(0x008888);
+						}
+						g.drawRect(dice[i][j].x+15,dice[i][j].y+15,20,20);
+						break;
+				}*/
 			}
-			drawHealthBar(dice[i][j].x,dice[i][j].y,dice[i][j].hp,dice[i][j].maxHp,dice[i][j].ironHp);
-			//drawPips(pips,dice[i][j].x,dice[i][j].y,originalPips);
-			/*switch(dice[i][j].dice[dice[i][j].side][0]) {
-				case "attack":
-					g.beginFill(0xFF0000);
-					if (pristine) {
-						g.beginFill(0x00FFFF);
-					}
-					g.drawRect(dice[i][j].x+15,dice[i][j].y+15,20,20);
-					break;
-				case "defend":
-					g.beginFill(0x999999);
-					if (pristine) {
-						g.beginFill(0x008888);
-					}
-					g.drawRect(dice[i][j].x+15,dice[i][j].y+15,20,20);
-					break;
-			}*/
 		}
-	}
-}
+	//}
 	if (selectedId!=-1) {
 		drawNet(selectedId,selectedIndex,netX,netY);
 	} else if (hoveringId!=-1) {
@@ -3351,11 +3659,11 @@ function render() {
 
 		g.lineStyle(2,0x000000);
 		g.beginFill(0xFFFFFF);
-		if(locked) {
+		//if(locked) {
 			if (selectedId==-2&&i==selectedIndex) {
 				g.beginFill(0x777777);
 			}
-		}
+		//}
 		if (enemies[i].ranged) {
 			g.beginFill(0xBBBBBB);
 		}
@@ -3370,11 +3678,13 @@ function render() {
 			keywords = face[2];
 			pips = getPips(type,pips,keywords,enemies[i]);
 		//drawFace(enemies[i].dice[enemies[i].side],enemies[i].x,enemies[i].y);
+		setEnemyTargetBorder(i);
 		drawFace(face,enemies[i].x,enemies[i].y,-2,i);
 		drawHealthBar(enemies[i].x,enemies[i].y,enemies[i].hp,enemies[i].maxHp,enemies[i].ironHp);
 
 		//drawPips(enemies[i].dice[enemies[i].side][1],enemies[i].x,enemies[i].y);
-		g.lineStyle(2,0xFF0000);
+		g.lineStyle(1,0xFF0000,0.5);
+		//g.alpha=0.5;
 		var cleave = false;
 		var descend = false;
 		var keywords = enemies[i].dice[enemies[i].side][2];
@@ -3393,6 +3703,7 @@ function render() {
 			var targetId=-1;
 			var targetIndex=-1;
 			[targetId,targetIndex] = getRedirectedTarget(enemies[i].targets[j][0],enemies[i].targets[j][1]);
+			setTargetLine(targetId,targetIndex,i);
 			g.lineTo(getDice(targetId,targetIndex).x+getDice(targetId,targetIndex).width/2,getDice(targetId,targetIndex).y);
 			/*if (cleave) {
 				if (validDice(enemies[i].targets[j][0],enemies[i].targets[j][1]-1)) {
@@ -3439,6 +3750,7 @@ function render() {
 					g.moveTo(enemies[i].x+enemies[i].width/2,enemies[i].y+enemies[i].height);
 					[targetId,targetIndex] = getRedirectedTarget(id,upper);
 					var tempDice = getDice(targetId,targetIndex);
+					setTargetLine(targetId,targetIndex,i);
 					g.lineTo(tempDice.x+tempDice.width/2,tempDice.y);
 				}
 				if (lower!=-1) {
@@ -3446,6 +3758,7 @@ function render() {
 					[targetId,targetIndex] = getRedirectedTarget(id,lower);
 					
 					var tempDice = getDice(targetId,targetIndex);
+					setTargetLine(targetId,targetIndex,i);
 					g.lineTo(tempDice.x+tempDice.width/2,tempDice.y);
 				}
 
@@ -3458,8 +3771,9 @@ function render() {
 				g.lineTo(unownedDice[enemies[i].targets[j][0]-1][enemies[i].targets[j][1]-1].x+25,50);
 			}*/
 		}
+		//g.alpha=1;
 
-	//g.lineStyle(2,0x000000);
+		g.lineStyle(2,0x000000);
 	//g.beginFill(0xFFFFFF);
 	//drawFace(enemies[i].dice[enemies[i].side],i*50,100);
 		/*switch(enemies[i].dice[enemies[i].side][0]) {
@@ -3491,7 +3805,93 @@ function render() {
 			g.lineTo(dice[playerId][upgradeIndices[i]].x+SQUARE/2,dice[playerId][upgradeIndices[i]].y+SQUARE);
 		}
 	}
+	if (gameState=="equipment") {
+		for (var i in items) {
+			g.lineStyle(2,0x000000);
+			g.beginFill(0xFF00FF);
+			if (i==selectedIndex) {
+				g.beginFill(0x880088);
+			}
+			g.drawRect(50*i,upY,50,50);
+		}
+	}
+	if (gameState=="inventory") {
+		drawInventory();
+	}
 	g.lineStyle(2,0x000000);
+}
+
+function setTargetLine(targetId,targetIndex,enemyIndex) {
+	if ((targetId==selectedId&&targetIndex==selectedIndex)||(selectedId==-2&&selectedIndex==enemyIndex)) {
+		g.lineStyle(2,0xFF0000,1);
+	} else {
+		g.lineStyle(1,0xFF0000,0.25);
+	}
+}
+
+function setTargetBorder(targetId,targetIndex) {
+	var highlight=false;
+	if (selectedId==-2) {
+		for (var i in enemies[selectedIndex].targets) {
+			if (targetId==enemies[selectedIndex].targets[i][0]&&targetIndex==enemies[selectedIndex].targets[i][1]) {
+				highlight=true;
+				break;
+			}
+		}
+	}
+	if (targetId==selectedId&&targetIndex==selectedIndex) {
+		highlight=true;
+	}
+	if (highlight) {
+		g.lineStyle(2,0xFF0000);
+	} else {
+		g.lineStyle(2,0x000000);
+	}
+}
+
+function setEnemyTargetBorder(enemyIndex) {
+	var highlight=false;
+	if (selectedId==-2&&selectedIndex==enemyIndex) {
+		highlight=true;
+	}
+	for (var i in enemies[enemyIndex].targets) {
+		if (selectedId==enemies[enemyIndex].targets[i][0]&&selectedIndex==enemies[enemyIndex].targets[i][1]) {
+			highlight=true;
+			break;
+		}
+	}
+	if (highlight) {
+		g.lineStyle(2,0xFF0000);
+	} else {
+		g.lineStyle(2,0x000000);
+	}
+}
+
+var inventoryCoords=[];
+function processInventoryCoords() {
+	for (var i in inventory) {
+		inventoryCoords[i]=[400+(i%8)*SQUARE,300+Math.floor(i/8)*SQUARE];
+	}
+}
+function drawInventory() {
+	processInventoryCoords();
+	g.lineStyle(2,0x000000);
+	for (var i in inventory) {
+		g.beginFill(0xFFFFFF);
+		if (selectedId==-6&&selectedIndex==i) {
+			g.beginFill(0x888888);
+		}
+		g.drawRect(inventoryCoords[i][0],inventoryCoords[i][1],SQUARE,SQUARE);
+		drawItem(inventory[i],inventoryCoords[i][0],inventoryCoords[i][1]);
+	}
+}
+function drawItem(item,x,y) {
+	switch (item) {
+		default:
+			g.beginFill(0xFFFF00);
+			g.drawRect(x+15,y+15,20,20);
+			break;
+	}
 }
 
 function cleaveIndices(id, index) {
@@ -3528,7 +3928,7 @@ function cleaveIndices(id, index) {
 		return [upper,lower];
 }
 
-var upY=550;
+var upY=600-50;
 var netX=50;
 var netY=400;
 
@@ -3549,15 +3949,25 @@ function drawNet(id,index,x,y) {
 	g.beginFill(0xFFFFFF);
 	drawFace(tempFaces[2],x+50,y,id,index);
 	g.beginFill(0xFFFFFF);
-	drawFace(tempFaces[3],x+50,y+100,id,index);
+	drawFace(tempFaces[3],x+50,y+50*2,id,index);
 	g.beginFill(0xFFFFFF);
-	drawFace(tempFaces[4],x+100,y+50,id,index);
+	drawFace(tempFaces[4],x+50*2,y+50,id,index);
 	g.beginFill(0xFFFFFF);
-	drawFace(tempFaces[5],x+150,y+50,id,index);
+	drawFace(tempFaces[5],x+50*3,y+50,id,index);
+
+	for (var i in getDice(id,index).equipment) {
+		if (i>itemNetCoords.length) {
+			//uhhh
+		} else {
+			drawItem(getDice(id,index).equipment[i],x+itemNetCoords[i][0],y+itemNetCoords[i][1]);
+		}
+	}
 }
+var itemNetCoords = [[0,0],[0,2*50]];
 
 function drawFace(face,x,y,id,index) {
 	g.drawRect(x,y,50,50);
+	g.lineStyle(2,0x000000);
 	var typeCheck = face[0].split(" ");
 	var tempType = face[0];
 	if (typeCheck[0]=="summon") {
