@@ -3747,7 +3747,6 @@ function setInfo() {
 						colour = keywordColours[keyword].toString(16);
 					}
 					document.getElementById("info").innerHTML+="<b style=\"color:#"+colour+"\">"+keyword+"</b>: "+keywordInfo[keyword];
-					document.getElementById("info").innerHTML+=keyword+": "+keywordInfo[keyword];
 				}
 			} else if (selectedId>=0) {
 				if (tempSide==-2) {
