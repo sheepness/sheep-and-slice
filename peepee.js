@@ -4540,9 +4540,9 @@ function drawHealthBar(id,index) {
 	g.lineStyle(0,0x000000);
 	drawSolidHealth(x,y,1,maxHp,0xFF0000);
 	drawSolidHealth(x,y,1,hp,0x00FF00);
-	drawSolidHealth(x,y,Math.max(1,hp-tempUnit.poison+1),hp,0x008800);
+	drawSolidHealth(x,y,Math.max(1,hp-tempUnit.poison-tempUnit.incomingPoison+1),hp,0x008800);
 	if (id>=0) {
-		drawSolidHealth(x,y,Math.max(1,hp-tempUnit.poison-tempUnit.incoming+1),hp,0xBBBB00);
+		drawSolidHealth(x,y,Math.max(1,hp-tempUnit.poison-tempUnit.incomingPoison-tempUnit.incoming+1),hp-tempUnit.poison-tempUnit.incomingPoison,0xBBBB00);
 	}
 	drawHealth(x,y,iron,0x888888);
 	drawHealth(x,y,ghosts,0x888888);
