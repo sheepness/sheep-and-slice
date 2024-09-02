@@ -1427,8 +1427,13 @@ document.addEventListener('mousemove', (event) => {
 			var tempDice = getDice(hoveringId,hoveringIndex);
 			var tempFace = getFace(hoveringId,hoveringIndex,tempDice.side);
 			document.getElementById("dice name").innerHTML+=", "+tempFace[0]+" "+tempFace[1];
-			for (var i in tempFace[2]) {
-				document.getElementById("dice name").innerHTML+=" "+tempFace[2][i];
+			var keywords = tempFace[2];
+			for (var i in keywords) {
+				var colour = "";
+				if (keywordColours[keywords[i]]) {
+					colour = keywordColours[keywords[i]].toString(16);
+				}
+				document.getElementById("dice name").innerHTML+=" <b style=\"color:#"+colour+"\">"+keywords[i]+"</b>";
 			}
 		}
 			setInfo();
@@ -1458,8 +1463,13 @@ document.addEventListener('mousemove', (event) => {
 
 				var tempFace = getFace(selectedId,selectedIndex,hoverSide);
 				document.getElementById("dice name").innerHTML=tempFace[0]+" "+tempFace[1];
-				for (var i in tempFace[2]) {
-					document.getElementById("dice name").innerHTML+=" "+tempFace[2][i];
+				var keywords = tempFace[2];
+				for (var i in keywords) {
+					var colour = "";
+					if (keywordColours[keywords[i]]) {
+						colour = keywordColours[keywords[i]].toString(16);
+					}
+					document.getElementById("dice name").innerHTML+=" <b style=\"color:#"+colour+"\">"+keywords[i]+"</b>";
 				}
 				
 				hoveringId=-4;
@@ -2944,7 +2954,7 @@ function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipm
 				break;
 			case "metal studs":
 				for (var j in tempDice) {
-					if (tempDice[j][0]=="defend"||tempDice[j][2].contains("selfshield")) {
+					if (tempDice[j][0]=="defend"||tempDice[j][2].includes("selfshield")) {
 						tempDice[j][1]++;
 					}
 				}
@@ -3046,7 +3056,7 @@ function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipm
 	return tempFace;
 }
 function addKeyword(face,keyword) {
-	if (!face[2].contains(keyword)) {
+	if (!face[2].includes(keyword)) {
 		face[2].push(keyword);
 	}
 }
@@ -4332,7 +4342,14 @@ function setTargetBorder(targetId,targetIndex) {
 	var highlight=false;
 	if (selectedId==-2) {
 		for (var i in enemies[selectedIndex].targets) {
-			if (targetId==enemies[selectedIndex].targets[i][0]&&targetIndex==enemies[selectedIndex].targets[i][1]) {
+			var upper=-1;
+			var lower=-1;
+			var keywords = enemies[selectedIndex].dice[enemies[selectedIndex].side][2];
+			if (keywords.includes("cleave")) {
+				[upper,lower] = cleaveIndices(targetId,targetIndex);
+			}
+			if (targetId==enemies[selectedIndex].targets[i][0]&&(targetIndex==enemies[selectedIndex].targets[i][1]
+				||upper==enemies[selectedIndex].targets[i][1]||lower==enemies[selectedIndex].targets[i][1])) {
 				highlight=true;
 				break;
 			}
@@ -4354,7 +4371,15 @@ function setEnemyTargetBorder(enemyIndex) {
 		highlight=true;
 	}
 	for (var i in enemies[enemyIndex].targets) {
-		if (selectedId==enemies[enemyIndex].targets[i][0]&&selectedIndex==enemies[enemyIndex].targets[i][1]) {
+		var [targetId,targetIndex] = enemies[enemyIndex].targets[i];
+		var upper=-1;
+		var lower=-1;
+		var keywords = enemies[enemyIndex].dice[enemies[enemyIndex].side][2];
+		if (keywords.includes("cleave")) {
+			[upper,lower] = cleaveIndices(targetId,targetIndex);
+		}
+		if (selectedId==enemies[enemyIndex].targets[i][0]&&(selectedIndex==enemies[enemyIndex].targets[i][1]
+			||upper==selectedIndex||lower==selectedIndex)) {
 			highlight=true;
 			break;
 		}
