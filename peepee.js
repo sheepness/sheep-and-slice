@@ -15,7 +15,7 @@ var host=false;
 
 var ready = false;
 var rerolls=2;
-var round=1;
+var round=11;
 
 var inventory=[];
 socket.on("add to inventory", (item)=> {
@@ -147,7 +147,9 @@ socket.on("lock",()=> {
 	}*/
 });
 socket.on("enemy roll",(enemy,side) => {
-	enemies[enemy].side=side;
+	if (!host) {
+		enemies[enemy].side=side;
+	}
 });
 socket.on("enemy target",(enemy,targetId,targetIndex) => {
 	console.log(targetId + " " + targetIndex);
@@ -186,12 +188,13 @@ var fightTemplate = {
 	bones:false,
 	caw:false,
 	hydra:false,
+	hydraCount:0,
 	thorns:0,
-	petrify:0,
 	magicImmune:false,
 	keywordModifiers:[0,0,0,0,0,0],
 	duplicate:false,
 	singleUse: [false,false,false,false,false,false],
+	petrify: [false,false,false,false,false,false],
 	redirectId:-1,
 	redirectIndex:-1,
 	minRound:21,
@@ -224,9 +227,11 @@ var fightTemplate = {
 	warchief:false,
 	basilisk:false,
 	cyclops:false,
+	tempBuff:[0,0,0,0,0,0],
+	tempKeywords:[],
 };
 var fightList = [[["goblin","boar"],["bee","wolf","archer","bee"],["wolf","archer","archer"],["boar","bee","archer"]],[["wolf","boar","bee"]],[["wolf","wolf","archer"],["goblin","goblin","bee","archer"]],[["troll"],["alpha","wolf"],["rat","bramble"]]];
-var bossList = [[["troll"],["alpha","wolf"],["rat","bramble"]],[["slimelet","slimequeen"]],[["bones","lich","bones","bones"]],[["archer","slate","trollking"]],[["archer","caw","dragon"]]];
+var bossList = [[["troll"],["alpha","wolf"],["rat","bramble"]],[["slimelet","slimequeen"]],[["bones","lich","bones","bones"]],[["archer","slate","trollking"]],[["archer","caw","dragon"],["wisp","wisp","inevitable","wisp","wisp","wisp"]]];
 
 function generateFight(roundNo) {
 	if (roundNo%4==0) {
@@ -309,7 +314,7 @@ var fightDiceTemplates = {
 	spider: {minRound:6,maxRound:6,size:1,
 		dice:[["attack",3,[]],["attack",3,[]],["attack",3,[]],["attack",3,[]],["attack",1,["poison"]],["attack",3,["poison"]]],},
 	wisp: {minRound:5,maxRound:5,size:1,
-		dice:[["selfheal",3,["vitality"]],["attack",2,["inflict pain"]],["attack",2,["inflict pain"]],["attack",2,["inflictpain"]],["summon bones",1,[]],["summon bones",1,[]]],},
+		dice:[["selfheal",3,["vitality"]],["attack",2,["inflict pain"]],["attack",2,["inflict pain"]],["attack",2,["inflict pain"]],["summon bones",1,[]],["summon bones",1,[]]],},
 	grave: {minRound:3,maxRound:3,size:1,
 		dice:[["summon bones",1,[]],["summon bones",1,[]],["summon bones",1,[]],["summon bones",1,[]],["summon bones",1,[]],["summon bones",1,[]]]},
 	shade: {minRound:2,maxRound:2,size:1,
@@ -323,7 +328,7 @@ var fightDiceTemplates = {
 	gnoll: {minRound:4,maxRound:4,size:2,
 		dice:[["attack",5,["heavy"]],["attack",5,["heavy"]],["attack",6,["exert"]],["attack",6,["exert"]],["attack",4,["heavy"]],["attack",4,["heavy"]]],},
 	carrier: {minRound:3,maxRound:3,size:2,
-		dice:[["attack",5,[]],["attack",5,[]],["attack",2,["poison"]],["attack",2,["poison"]],["attack",5,[]],["attack all all all",1,["poison"]]],},
+		dice:[["attack",5,[]],["attack",5,[]],["attack",2,["poison"]],["attack",2,["poison"]],["attack",5,[]],["attack all all",1,["poison"]]],},
 	bandit: {minRound:2,maxRound:4,size:2,
 		dice:[["attack",6,[]],["attack",6,[]],["attack",5,[]],["attack",5,[]],["attack",2,["poison"]],["attack",2,["poison"]]],},
 	blind: {minRound:2,maxRound:4,size:2,
@@ -364,7 +369,8 @@ var fightDiceTemplates = {
 		dice:[["attack all",5,[]],["attack all",5,[]],["attack",15,["heavy"]],["attack",15,["heavy"]],["attack",3,["cleave","poison"]],["attack",3,["cleave","poison"]]],},
 	hydra: {minRound:4,maxRound:5,size:3,
 		dice:[["attack",5,["cleave"]],["attack",5,["cleave"]],["attack",10,[]],["attack",10,[]],["attack",5,["cleave"]],["attack",2,["weaken","cleave"]]],},
-	
+	inevitable: {minRound:6,maxRound:6,size:4,
+		dice:[["attack",6,["heavy","selfheal","era"]],["attack",6,["heavy","selfheal","era"]],["attack",3,["inflict exert","cleave","era"]],["attack",3,["inflict exert","cleave","era"]],["outer",3,["weaken","era"]],["outer",3,["weaken","era"]]],},
 }
 socket.on("spawn",(enemy) => {
 	spawnEnemy(enemy,enemies.length);
@@ -484,7 +490,6 @@ function spawnEnemy(enemy,pos) {
 		case "shade":
 			temp.hp=5;
 			temp.maxHp=5;
-			temp.ranged=true;
 			temp.allGhost = true;
 			break;
 		case "seed":
@@ -609,7 +614,11 @@ function spawnEnemy(enemy,pos) {
 			temp.maxHp=20;
 			temp.hydra=true;
 			break;
-		
+		case "inevitable":
+			temp.hp=30;
+			temp.maxHp=30;
+			temp.inevitable=true;
+			break;
 		default:
 			break;
 	}
@@ -648,6 +657,28 @@ function spawnEnemy(enemy,pos) {
 		}
 	}
 
+	if (temp.cyclops) {
+		temp.stunHp.push(Math.ceil(temp.maxHp/2));
+	}
+	if (temp.inevitable) {
+		for (var i=5; i<=temp.maxHp; i+=5) {
+			temp.ghostHp.push(i);
+		}
+	}
+	if (temp.chomp) {
+		for (var i=1; i<=Math.min(5,temp.maxHp); i++) {
+			temp.chompDownHp.push(i);
+		}
+		for (var i=Math.max(1,temp.maxHp-4); i<=temp.maxHp; i++) {
+			temp.chompUpHp.push(i);
+		}
+	}
+	if (temp.ogre) {
+		for (var i=3; i<=temp.maxHp; i+=5) {
+			temp.ogreHp.push(i);
+		}
+	}
+
 	temp.name=enemy;
 	temp.position=parseInt(pos);
 	enemies.push(temp);
@@ -662,11 +693,7 @@ function spawnFight() {
 			socket.emit("spawn",randFight[i]);
 		}
 	} else {
-		socket.emit("spawn","slimer");
-		socket.emit("spawn","slimer");
-		socket.emit("spawn","slimer");
-		socket.emit("spawn","slimer");
-		socket.emit("spawn","slimer");
+		socket.emit("spawn","ogre");
 	}
 	//socket.emit("send","update text");
 }
@@ -786,6 +813,9 @@ var template = {
 	maxEquipment:2,
 	equipment:[],
 	position:0,
+	armour:0,
+	tempBuff:[0,0,0,0,0,0],
+	tempKeywords:[],
 }
 
 var diceTemplates={
@@ -1041,6 +1071,8 @@ socket.on("start",()=> {
 		rollDice();
 	}*/
 });
+
+var blindCheck = false;
 socket.on("player turn",()=> {
 	playerTurn=true;
 	rerolls=2;
@@ -1051,15 +1083,15 @@ socket.on("player turn",()=> {
 	/*for (var i in enemies) {
 		initialEnemies[i]=structuredClone(enemies[i]);
 	}*/
+	//start of turn
 	for (var i in dice) {
-						for (var j in dice[i]) {
-							dice[i][j].incoming=0;
-							if (dice[i][j].exert>0) {
-								dice[i][j].exert--;
-							}
-							dice[i][j].block+=dice[i][j].autoblock;
-						}
-					}
+		for (var j in dice[i]) {
+			dice[i][j].incoming=0;
+			
+			dice[i][j].block+=dice[i][j].autoblock;
+			
+		}
+	}
 	calcIncoming();
 	/*for (var i in enemies) {
 		for (var j in enemies[i].targets) {
@@ -1152,8 +1184,18 @@ socket.on("send",(cmd)=> {
 		case "end turn":
 			document.getElementById("history").innerHTML+="<b>Player "+culprit+"</b> ";
 			document.getElementById("history").innerHTML+="ended turn<br />";
+			removeTemporaryEffects();
 			resolveAttacks();
 			reposition();
+			checkEnemyConditions();
+			checkDead();
+			if (blindCheck) {
+				for (var i in enemies) {
+					if (enemies[i].blind) {
+						getDice(-2,i).dead=true;
+					}
+				}
+			}
 			resolvePoison();
 			checkDead();
 			removeBlock();
@@ -1226,6 +1268,8 @@ socket.on("send",(cmd)=> {
 			}
 				upgradeSent = false;
 			actionQueue=[];
+
+			items=[];
 			break;
 		case "heal all":
 			for (var i in dice) {
@@ -1623,8 +1667,15 @@ document.addEventListener('mouseup', (event) => {
 								}
 							}
 
+							var stunCheck = true;
+							if (tempFace[0]=="stun") {
+								if (tempDice.hp<tempTarget.hp) {
+									stunCheck=false;
+								}
+							}
+
 							
-							if (heavyCheck&&rangedCheck) {
+							if (heavyCheck&&rangedCheck&&stunCheck) {
 								socket.emit("action",selectedId,selectedIndex,hoveringId,hoveringIndex);
 								if (tempTarget.caw) {
 									tempTarget.ranged=true;
@@ -1987,6 +2038,79 @@ function checkDying(unit) {
 	return (unit.hp<=unit.poison+unit.incomingPoison-unit.regen+Math.max(0,unit.incoming-unit.block)||unit.dead);
 }
 
+function heavyTargetsAll(id) {
+	var list=[];
+	for (var i=0; i<dice[id].length; i++) {
+		list.push(i);
+	}
+	return heavyTargets(id,list);
+}
+
+function totalIncoming(id, index) {
+	var tempUnit = getDice(id,index);
+	return tempUnit.incoming+tempUnit.incomingPoison+tempUnit.poison-tempUnit.regen;
+}
+
+function heavyTargets(id,list) {
+	var targetIndices = [];
+	if (list.length==0) {
+		return [];
+	}
+	var highestHp = -1;
+	if (id>=0) {
+		for (var i in list) {
+			/*if (dice[id][list[i]].dead) {
+				continue;
+			}*/
+			if (i==0) {
+				highestHp = dice[id][list[i]].hp-totalIncoming(id,list[i]);
+			} else {
+				highestHp = Math.max(highestHp,dice[id][list[i]].hp-totalIncoming(id,list[i]));
+			}
+		}
+		for (var i in list) {
+			if (dice[id][list[i]].hp-totalIncoming(id,list[i])==highestHp) {
+				targetIndices.push(list[i]);
+			}
+		}
+	}
+	return targetIndices;
+}
+
+function eliminateTargets(id,list) {
+	var targetIndices = [];
+	var lowestHp = -1;
+	if (id>=0) {
+		for (var i in list) {
+			/*if (dice[id][list[i]].dead) {
+				continue;
+			}*/
+			if (i==0) {
+				lowestHp = dice[id][list[i]].hp-totalIncoming(id,list[i]);
+			} else {
+				lowestHp = Math.min(lowestHp,dice[id][list[i]].hp-totalIncoming(id,list[i]));
+			}
+		}
+		console.log("eliminate "+lowestHp);
+		for (var i in list) {
+			if (dice[id][list[i]].hp-totalIncoming(id,list[i])==lowestHp) {
+				targetIndices.push(list[i]);
+			}
+		}
+	}
+	return targetIndices;
+}
+
+function intersection(a,b) {
+	var inter = [];
+	for (var i in a) {
+		if (b.includes(a[i])) {
+			inter.push(a[i]);
+		}
+	}
+	return inter;
+}
+
 function enemyRoll() {
 	for (var i in enemies) {
 		if (enemies[i].dead) {
@@ -2072,16 +2196,42 @@ function enemyRoll() {
 						notDeadUnitsIndices.push(j);
 					}
 				}
+
 				var targetIndex = -1;
-				if (notDyingUnitsIndices.length>0) {
+				/*if (notDyingUnitsIndices.length>0) {
 					targetIndex = notDyingUnitsIndices[Math.floor(Math.random()*notDyingUnitsIndices.length)];
 				} else if (notDeadIndices.length>0) {
 					targetIndex = notDeadUnitsIndices[Math.floor(Math.random()*(notDeadUnitsIndices.length))];
 				} else {
 					console.log("HOW IS EVERYONE DEAD");
 					targetIndex = Math.floor(Math.random()*dice[targetId].length);;
+				}*/
+				
+				if (!keywords.includes("heavy")&&!keywords.includes("eliminate")) {
+					if (notDyingUnitsIndices.length>0) {
+						targetIndex = notDyingUnitsIndices[Math.floor(Math.random()*(notDyingUnitsIndices.length))];
+					} else if (notDeadUnitsIndices.length>0) {
+						targetIndex = notDeadUnitsIndices[Math.floor(Math.random()*(notDeadUnitsIndices.length))];
+					}
+					if (targetIndex!=-1) {
+						sendTarget(i,targetId,targetIndex)
+					}
+				} else {
+					var heavyIndices = heavyTargets(targetId,notDeadUnitsIndices);
+					var eliminateIndices = eliminateTargets(targetId,notDeadUnitsIndices);
+					if (keywords.includes("heavy")) {
+						notDeadUnitsIndices = intersection(notDeadUnitsIndices,heavyIndices);
+					}
+					if (keywords.includes("eliminate")) {
+						notDeadUnitsIndices = intersection(notDeadUnitsIndices,eliminateIndices);
+					}
+					if (notDeadUnitsIndices.length>0) {
+						targetIndex = notDeadUnitsIndices[Math.floor(Math.random()*(notDeadUnitsIndices.length))];
+					}
+					if (targetIndex!=-1) {
+						sendTarget(i,targetId,targetIndex)
+					}
 				}
-				sendTarget(i,targetId,targetIndex)
 				//socket.emit("enemy target",i,targetId,targetIndex);
 				//enemies[i].targets.push([parseInt(targetId),parseInt(targetIndex)]);
 				//getDice(targetId,targetIndex).incoming+=pips;
@@ -2118,18 +2268,28 @@ function enemyRoll() {
 					}
 				}
 				break;
+			case "attack all all":
+				for (var j in dice) {
+					for (var k in dice[j]) {
+						if (!dice[j][k].dead) {
+							sendTarget(i,j,k);
+						}
+					}
+				}
+				break;
 			case "summon":
 			default:
 				break;
 		}
 		socket.emit("enemy roll",i,roll);
+		enemies[i].side=roll;
 		calcIncoming();
 	}
 }
 
 function sendTarget(i,targetId,targetIndex) {
 	if (!host) {
-		console.log("HOW");
+		console.log("HOW ARE YOU NOT HOST");
 		return;
 	}
 	socket.emit("enemy target",i,targetId,targetIndex);
@@ -2196,7 +2356,7 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 				break;
 			}
 		}*/
-	if (user.exert>0||user.singleUse[side]) {
+	if (user.exert>0||user.singleUse[side]||user.petrify[side]) {
 		return;
 	}
 	var type = die[side][0];
@@ -2348,7 +2508,7 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 		}
 	}*/
 	//pip calculation starts here
-	pips = getPips(type,pips,keywords,user);
+	pips = getPips(type,pips,keywords,userId,userIndex);
 	if (targetId!=-1) {
 		var target = getDice(targetId,targetIndex);
 		if (effects.focus) {
@@ -2372,7 +2532,7 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 					if (i!=oldIndex) {
 						[tempId,tempIndex] = getRedirectedTarget(oldId,i);
 						if (!getDice(tempId,tempIndex).dead)
-						{act(type,pips,userId,userIndex,tempId,tempIndex);}
+						{act(type,pips,userId,userIndex,tempId,tempIndex,keywords);}
 					}
 				}
 			} else if (oldId>=0) {
@@ -2380,11 +2540,12 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 					if (i!=oldIndex) {
 						[tempId,tempIndex] = getRedirectedTarget(oldId,i);
 						if (!getDice(tempId,tempIndex).dead)
-						{act(type,pips,userId,userIndex,tempId,tempIndex);}
+						{act(type,pips,userId,userIndex,tempId,tempIndex,keywords);}
 					}
 				}
 			}
 		}
+		
 
 		if (effects.cleave||effects.descend){
 			console.log(targetId)
@@ -2448,6 +2609,13 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 	}
 	if (effects.selfshield) {
 		user.block+=pips;
+	}
+	if (effects.selfheal) {
+		user.hp+=pips;
+		user.hp=Math.min(user.maxHp,user.hp);
+	}
+	if (effects.vitality) {
+		getDice(targetId,targetIndex).maxHp+=pips;
 	}
 
 	act(type,pips,userId,userIndex,targetId,targetIndex,keywords);
@@ -2543,7 +2711,8 @@ var effectsTemplate = { cleave: false,
 	 copycat : false,
 	 smith : false, //
 	 descend : false,};
-function getPips(type,pips,keywords,user) {
+function getPips(type,pips,keywords,userId,userIndex) {
+	var user = getDice(userId,userIndex);
 	var effects = structuredClone(effectsTemplate);
 	/*var type = dice[side][0];
 	var pips = dice[side][1];
@@ -2557,7 +2726,7 @@ function getPips(type,pips,keywords,user) {
 			effects[focusKeywords[i]] = true;
 		}
 	}*/
-	pips+=user.keywordModifiers[user.side]; // 7: in combat buffs
+	pips+=user.keywordModifiers[user.side]; // NOT 7: in combat buffs this is still 8: keywords
 
 	// 8: static keywords
 	if (effects.steel) {
@@ -2600,9 +2769,34 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 	var user = getDice(userId,userIndex);
 	var target = getDice(targetId,targetIndex);
 	for (var idx in keywords) {
-		switch (keywords[idx]) {
+		var mainWord = keywords[idx].split(" ")[0];
+		switch (mainWord) {
 			case "poison":
 				target.poison+=pips;
+				break;
+			case "regen":
+				target.regen+=pips;
+				break;
+			case "petrify":
+				var petrifyCounter=pips;
+				for (var i=0; i<petrifyOrder.length; i++) {
+					if (!target.petrify[petrifyOrder[i]]) {
+						target.petrify[petrifyOrder[i]] = true;
+						petrifyCounter--;
+					}
+					if (petrifyCounter<=0) {
+						break;
+					}
+				}
+				break;
+			case "weaken":
+				for (var i=0; i<target.tempBuff.length;i++) {
+					target.tempBuff[i]-=pips;
+				}
+				break;
+			case "inflict":
+				target.tempKeywords.push(keywords[idx].split(" ")[1]);
+				break;
 		}
 	}
 	var tempType = type;
@@ -2617,11 +2811,17 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 		case "attack":
 		case "outer":
 		case "attack all":
-			hurt(targetId,targetIndex,Math.max(0,pips));
+		case "attack all all":
+			hurt(targetId,targetIndex,Math.max(0,pips-target.armour));
 			hurt(userId,userIndex,target.thorns);
+			if (targetId==-2) {
+				if (target.basilisk) {
+					user.petrify[user.side]=true;
+				}
+			}
 			break;
 		case "defend":
-			target.block+=Math.max(0,pips);
+			target.block+=Math.max(0,pips-target.armour);
 			break;
 		case "stun":
 			if (targetId>=0) {
@@ -2646,6 +2846,11 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 			} else {
 				summonEnemy(summonType,pips,user.position);
 			}
+			break;
+		case "selfheal":
+			console.log("self heal")
+			user.hp+=pips;
+			user.hp=Math.min(user.maxHp,user.hp);
 			break;
 	}
 }
@@ -2720,7 +2925,7 @@ function getDiceList(id) {
 	}
 }
 
-function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipment
+function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipment, then 6: warchief buff?
 	if (id==-3) {
 		return getDice(id,index).dice[side];
 	}
@@ -2730,9 +2935,8 @@ function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipm
 	var originalSide = tempDice[side];
 	var tempFace = tempDice[side];
 	var equipment = tempUnit.equipment;
-	if (tempUnit.duplicate) {
-		tempFace = structuredClone(tempUnit.duplicateFace);
-	}
+	
+	//4,5
 	for (var i in equipment) {
 		switch (equipment[i]) {
 			case "longsword":
@@ -3031,17 +3235,23 @@ function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipm
 				break;
 		}
 	}
-
-	tempFace = tempDice[side];
-	var keywords = structuredClone(tempFace[2]);
-	for (var i in keywords) {
-		if (keywords[i]=="copycat") {
-			for (var j in focusKeywords) {
-				if (!keywords.includes(focusKeywords[j]))
-					{keywords.push(focusKeywords[j]);}
+	//6
+	if (id==-2) {
+		for (var i in enemies) {
+			if (enemies[i].warchief) {
+				for (var j in tempDice) {
+					tempDice[j][1]++;
+				}
 			}
 		}
 	}
+	
+	tempFace = structuredClone(tempDice[side]);
+
+	var keywords = structuredClone(tempDice[side][2]);
+	
+	
+	//7? like wizard buff i guess
 	if (id>=0) {
 		for (var i in enemies) {
 			if (enemies[i].bramble) {
@@ -3052,7 +3262,26 @@ function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipm
 			}
 		}
 	}
+
+	for (var i in tempUnit.tempKeywords) {
+		if (!keywords.includes(tempUnit.tempKeywords[i]))
+			{keywords.push(tempUnit.tempKeywords[i]);}
+	}
+	tempFace[1]+=tempUnit.tempBuff[side];
+	//8
+	for (var i in keywords) {
+		if (keywords[i]=="copycat") {
+			for (var j in focusKeywords) {
+				if (!keywords.includes(focusKeywords[j]))
+					{keywords.push(focusKeywords[j]);}
+			}
+		}
+	}
+	
 	tempFace[2] = keywords;
+	if (tempUnit.duplicate) {
+		tempFace = structuredClone(tempUnit.duplicateFace);
+	}
 	return tempFace;
 }
 function addKeyword(face,keyword) {
@@ -3094,19 +3323,22 @@ function brokenHp(targetId,targetIndex,pips,hpList) {
 	var tempUnit = getDice(targetId,targetIndex);
 	var upperBound = tempUnit.hp;
 	var lowerBound = upperBound-pips;
+	console.log(upperBound + " "+ lowerBound + " peepee")
 
 	var brokenList=[];
 
 	for (var i in hpList) {
 		if (hpList[i]>lowerBound&&hpList[i]<=upperBound) {
-			brokenList.push(i);
+			brokenList.push(hpList[i]);
 		}
 	}
 	return brokenList;
 }
 
+var petrifyOrder = [2,0,1,4,5,3];
+
 function hurt(targetId,targetIndex, pips,unblockable) {
-	target = getDice(targetId,targetIndex);
+	var target = getDice(targetId,targetIndex);
 	var incoming = 0;
 	if (!unblockable) {
 		if (target.block>=pips) {
@@ -3132,8 +3364,20 @@ function hurt(targetId,targetIndex, pips,unblockable) {
 				incoming=target.hp-iron;
 			}
 		}
+
+		
+		if (targetId==-2) {
+			blindCheck=false;
+			if (target.hydra) {
+				target.hydraCount++;
+			}
+		}
+		
 		var stoneList = brokenHp(targetId,targetIndex,incoming,target.stoneHp);
+		console.log(targetId+" "+targetIndex+" "+incoming+" "+target.ghostHp);
 		var ghostList = brokenHp(targetId,targetIndex,incoming,target.ghostHp);
+
+			console.log(ghostList);
 		if (targetId == -2) {
 			var slimeList = brokenHp(targetId,targetIndex,incoming,target.slimeHp);
 			var slimerList = brokenHp(targetId,targetIndex,incoming,target.slimerHp);
@@ -3146,15 +3390,40 @@ function hurt(targetId,targetIndex, pips,unblockable) {
 			summonEnemy("slimelet",slimeList.length,target.position);
 			summonEnemy("slimer",slimerList.length,target.position);
 			summonEnemy("bones",lichList.length,target.position);
+			if (stunList.length>0) {
+				if (targetId==-2) {
+					target.targets=[];
+				}
+			}
+			for (var i=0; i<ogreList.length; i++) {
+				for (var j=0; j<6; j++) {
+					target.tempBuff[j]++;
+				}
+			}
+			if (quartzList.length>0) {
+				if (target.hp-incoming==quartzList[0]-1) {
+					kill(targetId,targetIndex);
+				}
+			}
+			for (var i in dice) {
+				hurt(i,0,chompUpList.length);
+				hurt(i,dice[i].length-1,chompDownList.length);
+			}
 			target.slimeHp.splice(target.slimeHp.length-slimeList.length,slimeList.length);
 			target.slimerHp.splice(target.slimerHp.length-slimerList.length,slimerList.length);
 			target.lichHp.splice(target.lichHp.length-lichList.length,lichList.length);
+			target.stunHp.splice(target.stunHp.length-stunList.length,stunList.length);
+			target.ogreHp.splice(target.ogreHp.length-ogreList.length,ogreList.length);
+			target.chompUpHp.splice(target.chompUpHp.length-chompUpList.length,chompUpList.length);
+			target.chompDownHp.splice(target.chompDownHp.length-chompDownList.length,chompDownList.length);
+			target.quartzHp.splice(target.quartzHp.length-quartzList.length,quartzList.length);
 		}
+		target.hp-=incoming;
 		if (ghostList.length>0) {
+			console.log(ghostList);
 			target.ghost=true;
 			target.ghostHp.splice(target.ghostHp.length-ghostList.length,ghostList.length);
 		}
-		target.hp-=incoming;
 	}
 }
 
@@ -3201,7 +3470,7 @@ function updateText() {
 			enemyBlockText[i].y=1.5*50;
 			enemyBlockText[i].style.fill=0x888888;
 			enemyBlockText[i].alpha=0;
-		var effectivePoison=enemies[i].poison-enemies[i].regen;
+		var effectivePoison=enemies[i].poison+enemies[i].incomingPoison-enemies[i].regen;
 		if (i>=enemyPoisonText.length) {
 			enemyPoisonText[i] = new PIXI.Text(effectivePoison);
 			app.stage.addChild(enemyPoisonText[i]);
@@ -3233,6 +3502,41 @@ function updateText() {
 }
 
 var age=0;
+
+function checkEnemyConditions() {
+	for (i in enemies) {
+		var goblinCheck = true;
+		if (enemies[i].goblin) {
+			for (j in enemies) {
+				if (i!=j&&!enemies[j].dead) {
+					goblinCheck = false;
+				}
+			}
+			if (goblinCheck) {
+				enemies[i].dead=true; //flee
+			}
+		}
+		if (enemies[i].militia) {
+			for (j in enemies[i].targets) {
+				var tempTarget = getDice(enemies[i].targets[j][0],enemies[i].targets[j][1]);
+				if (tempTarget.block>=5) {
+					enemies[i].dead=true; //flee
+				}
+			}
+		}
+		if (enemies[i].hydra) {
+			if (enemies[i].hydraCount>=5) {
+				kill(-2,i);
+			}
+		}
+	}
+	//checkDead();
+	for (i in enemies) {
+		if (enemies[i].dead) {
+			enemies[i].targets=[];
+		}
+	}
+}
 function processQueue() {
 	/*for (var i in previousDice) {
 		ownedDice[i]=structuredClone(previousDice[i]);
@@ -3256,6 +3560,8 @@ function processQueue() {
 	for (var i in enemies) {
 		enemies.push(structuredClone(initialEnemies[i]));
 	}*/
+
+	blindCheck = true;
 	for (pee in actionQueue) {
 		var user = getDice(actionQueue[pee][0],actionQueue[pee][1]);
 		var target = getDice(actionQueue[pee][2],actionQueue[pee][3]);
@@ -3275,33 +3581,8 @@ function processQueue() {
 		} else {
 			user.rampage=false;
 		}
-		for (i in enemies) {
-			var goblinCheck = true;
-			if (enemies[i].goblin) {
-				for (j in enemies) {
-					if (i!=j&&!enemies[j].dead) {
-						goblinCheck = false;
-					}
-				}
-				if (goblinCheck) {
-					enemies[i].dead=true; //flee
-				}
-			}
-			if (enemies[i].militia) {
-				for (j in enemies[i].targets) {
-					var tempTarget = getDice(enemies[i].targets[j][0],enemies[i].targets[j][1]);
-					if (tempTarget.block>=5) {
-						enemies[i].dead=true; //flee
-					}
-				}
-			}
-		}
-		//checkDead();
-		for (i in enemies) {
-			if (enemies[i].dead) {
-				enemies[i].targets=[];
-			}
-		}
+
+		checkEnemyConditions();
 		calcIncoming();
 		focusTargetId=actionQueue[pee][2];
 		focusTargetIndex=actionQueue[pee][3];
@@ -3333,10 +3614,17 @@ function calcIncoming() {
 		}
 	}
 	for (var i in enemies) {
+		var type = enemies[i].dice[enemies[i].side][0];
+		var pips = enemies[i].dice[enemies[i].side][1];
+		var keywords = enemies[i].dice[enemies[i].side][2];
+
+		var face = getFace(-2,i,enemies[i].side);
+		type = face[0];
+		pips = face[1];
+		keywords = face[2];
+
+		pips = getPips(type,pips,keywords,-2,i);
 		for (var j in enemies[i].targets) {
-			var type = enemies[i].dice[enemies[i].side][0];
-			var pips = enemies[i].dice[enemies[i].side][1];
-			var keywords = enemies[i].dice[enemies[i].side][2];
 			var cleave = false;
 			var poison = false;
 			var descend = false;
@@ -3361,6 +3649,7 @@ function calcIncoming() {
 					case "attack":
 					case "outer":
 					case "attack all":
+					case "attack all all":
 						dice[newId][newIndex].incoming+=pips;
 						if (poison) {
 							dice[newId][newIndex].incomingPoison+=pips;
@@ -3422,6 +3711,12 @@ function calcIncoming() {
 						break;
 				}
 		}
+		if (type=="attack all all") {
+			for (var j in enemies) {
+				enemies[j].incoming++;
+				enemies[j].incomingPoison++;
+			}
+		}
 	}
 }
 
@@ -3449,7 +3744,24 @@ function reposition() {
 	}
 	updateText();
 }
-
+function removeTemporaryEffects() {
+//remove temporary effects
+	for (var i in dice) {
+		for (var j in dice[i]) {
+			/*if (dice[i][j].hp<=0) {
+				dice[i][j].dead=true;
+			}*/
+			dice[i][j].duplicate = false;
+			if (dice[i][j].exert>0) {
+				dice[i][j].exert--;
+			}
+			for (var k in dice[i][j].tempBuff) {
+				dice[i][j].tempBuff[k] = 0;
+			}
+			dice[i][j].tempKeywords = [];
+		}
+	}
+}
 function resolveAttacks() {
 	for (var i in enemies) {
 		for (var j in enemies[i].targets) {
@@ -3459,29 +3771,47 @@ function resolveAttacks() {
 			//action(enemies[i].dice[enemies[i].side][0],enemies[i].dice[enemies[i].side][1],enemies[i],enemies[i].targets[j]);
 		}
 		var tempFace = getFace(-2,i,enemies[i].side);
+		if (tempFace[0]=="attack all all") {
+			for (var j in enemies) {
+				if (!enemies[j].dead) {
+					action(enemies[i].dice,enemies[i].side,-2,i,-2,j);
+				}
+			}
+		}
+		var type = tempFace[0];
 		var typeCheck = tempFace[0].split(" ");
-		if (enemies[i].targets.length==0&&typeCheck[0]=="summon"&&!enemies[i].dead) {
-			action(enemies[i].dice,enemies[i].side,-2,i,-1,-1);
+		if (typeCheck[0]=="summon") {
+			type = "summon";
+		}
+		//no target actions
+		if (enemies[i].targets.length==0&&!enemies[i].dead) {
+			switch (type) {
+				case "summon":
+					action(enemies[i].dice,enemies[i].side,-2,i,-1,-1);
+					break;
+				case "selfheal":
+					action(enemies[i].dice,enemies[i].side,-2,i,-2,i);
+					break;
+			}
 		}
 	}
+
+	//remove enemy temporary effects?
 	for (var i in enemies) {
 		enemies[i].targets=[];
 		if (enemies[i].caw) {
 			enemies[i].ranged=false;
 		}
+		for (var j in enemies[i].tempBuff) {
+			enemies[i].tempBuff[j]=0;
+		}
+		enemies[i].tempKeywords = [];
 	}
 	/*for (var i in ownedDice) {
 		previousDice[i]=structuredClone(ownedDice[i]);
 	}*/
 	checkDead();
-	for (var i in dice) {
-		for (var j in dice[i]) {
-			/*if (dice[i][j].hp<=0) {
-				dice[i][j].dead=true;
-			}*/
-			dice[i][j].duplicate = false;
-		}
-	}
+	
 	backupDice();
 
 	//updateText();
@@ -3585,9 +3915,21 @@ function checkDead() {
 	}
 	for (var i in enemies) {
 		if (enemies[i].hp<=0&&!enemies[i].dead) {
+			var [upper,lower] = cleaveIndices(-2,i);
 			kill(-2,i);
 			lethal = true;
 			//enemies[i].dead=true;
+			
+			if (enemies[i].hp<=-2) {
+				if (upper!=-1) {
+					if (enemies[upper].bandit) {
+						getDice(-2,upper).dead=true;
+					}
+					if (enemies[lower].bandit) {
+						getDice(-2,lower).dead=true;
+					}
+				}
+			}
 		}
 	}
 	return lethal;
@@ -3599,7 +3941,9 @@ function removeBlock() {
 		}
 	}
 	for (var i in enemies) {
-		enemies[i].block=0;
+		if (!enemies[i].golem) {
+			enemies[i].block=0;
+		}
 	}
 }
 function backupDice() {
@@ -3702,8 +4046,9 @@ var actionInfo = {
 	"attack": "damages target",
 	"defend": "shields target",
 	"attack all": "damages all of a group",
+	"attack all all": "damages everyone but themselves",
 	"nothing": "hi liam",
-	"stun": "stuns lol",
+	"stun": "stuns a target with equal or less hp",
 	"reuse": "can use a dice again",
 	"redirect": "makes actions targetting that unit target this unit instead",
 };
@@ -3883,7 +4228,7 @@ function gameLoop(delta){
 			break;
 		case "equipment":
 			if (!equipmentTurn) {
-				var tier = Math.ceil((round-1)/4);
+				var tier = Math.floor(round/2);
 
 				equipmentTracker = structuredClone(equipmentList[tier-1]);
 				var item = "uhh";
@@ -4107,8 +4452,8 @@ function render() {
 						pips*=2;
 					}
 				}*/
-				pips = getPips(type,pips,keywords,dice[i][j]);
-				if (dice[i][j].exert>0||dice[i][j].singleUse[dice[i][j].side]) {
+				pips = getPips(type,pips,keywords,i,j);
+				if (dice[i][j].exert>0||dice[i][j].singleUse[dice[i][j].side]||dice[i][j].petrify[dice[i][j].side]) {
 					pips=0;
 					exert=true;
 				}
@@ -4181,7 +4526,7 @@ function render() {
 			pips = face[1];
 			originalPips = face[1];
 			keywords = face[2];
-			pips = getPips(type,pips,keywords,enemies[i]);
+			pips = getPips(type,pips,keywords,-2,i);
 		//drawFace(enemies[i].dice[enemies[i].side],enemies[i].x,enemies[i].y);
 		setEnemyTargetBorder(i);
 		drawFace(face,enemies[i].x,enemies[i].y,-2,i);
@@ -4511,6 +4856,7 @@ function drawFace(face,x,y,id,index) {
 			g.drawRect(x+15,y+15,20,20);
 			break;
 		case "attack all":
+		case "attack all all":
 			g.beginFill(0xFF0000);
 			g.drawRect(x+10,y+10,30,30);
 			break;
@@ -4536,7 +4882,7 @@ function drawFace(face,x,y,id,index) {
 	var keywords = face[2];
 	drawKeywords(x,y,keywords);
 	if (id==-2||id>=0) {
-		pips = getPips(face[0],face[1],face[2],getDice(id,index));
+		pips = getPips(face[0],face[1],face[2],id,index);
 	}
 	drawPips(pips,x,y,originalPips);
 }
@@ -4565,15 +4911,19 @@ function drawHealthBar(id,index) {
 	drawSolidHealth(x,y,1,maxHp,0xFF0000);
 	drawSolidHealth(x,y,1,hp,0x00FF00);
 	drawSolidHealth(x,y,Math.max(1,hp-tempUnit.poison-tempUnit.incomingPoison+1),hp,0x008800);
-	if (id>=0) {
 		drawSolidHealth(x,y,Math.max(1,hp-tempUnit.poison-tempUnit.incomingPoison-tempUnit.incoming+1),hp-tempUnit.poison-tempUnit.incomingPoison,0xBBBB00);
-	}
 	drawHealth(x,y,iron,0x888888);
 	drawHealth(x,y,ghosts,0x888888);
+	
 	if (id==-2) {
 		drawHealth(x,y,slimes,0xDDDDDD);
 		drawHealth(x,y,slimers,0xDDDDDD);
 		drawHealth(x,y,boneses,0xDDDDDD);
+		drawHealth(x,y,tempUnit.stunHp,0x888888);
+		drawHealth(x,y,tempUnit.quartzHp,0x888888);
+		drawHealth(x,y,tempUnit.ogreHp,0xAAAA00);
+		drawHealth(x,y,tempUnit.chompUpHp,0xFF8800);
+		drawHealth(x,y,tempUnit.chompDownHp,0xFF8800);
 	}
 	/*g.beginFill(0xFF0000);
 	g.drawRect(x+5,y+5,4*maxHp,4);
