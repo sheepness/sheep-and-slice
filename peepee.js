@@ -5554,7 +5554,7 @@ var equipmentInfo = {
 	"chakram": "replace defend sides with ranged damage, retaining pips and keywords",
 	"splitting arrows": "replace right sides with attack 1 ranged cleave",
 	"hissing ring": "replace middle with attack 2 poison",
-	"dynamo": "add singleUse and era to right sides"
+	"dynamo": "add singleUse and era to right sides",
 	"mana jelly": "add singleUse and cantrip to all mana/manaGain sides",
 	"simplicity": "+1 pip to attack, defend, heal and mana sides with no keywords",
 	"sack of mana": "replace top and bottom with blanks, replace middle with mana 4",
