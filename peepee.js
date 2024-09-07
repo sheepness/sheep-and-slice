@@ -20,7 +20,7 @@ var round=1;
 
 var SQUARE = 50;
 
-var inventory=["bandana"];
+var inventory=[];
 socket.on("add to inventory", (item)=> {
 	if (gameState="equipment") {
 		inventory.push(item);
