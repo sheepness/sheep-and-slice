@@ -15,9 +15,12 @@ var host=false;
 
 var ready = false;
 var rerolls=2;
-var round=1;
+var round=21;
 
-var inventory=[];
+
+var SQUARE = 50;
+
+var inventory=["bandana"];
 socket.on("add to inventory", (item)=> {
 	if (gameState="equipment") {
 		inventory.push(item);
@@ -35,7 +38,6 @@ socket.on("equip",(id,index,itemIndex)=> {
 function processEquipment() {
 	for (var i in dice) {
 		for (var j in dice[i]) {
-
 			var tempEquipment = structuredClone(dice[i][j].equipment);
 			resetDie(i,j);
 			dice[i][j].equipment=tempEquipment;
@@ -77,13 +79,51 @@ function processEquipment() {
 					case "troll blood":
 						dice[i][j].regen+=2;
 						break;
+					case "learn flare":
+						dice[i][j].equipmentSpells.push(getSpellByName("flare"),i,j);
+						break;
 				}
-
-			
 			}
 			adjustDeathHp(i,j);
 		}
 	}
+}
+function getSpellByName(name,id,index) {
+	var temp = structuredClone(spellTemplate);
+	switch (name) {
+		case "flare":
+			temp.costType = "mana";
+			temp.cost = 4;
+			break;
+		case "formation":
+			temp.costType = "captain";
+			break;
+		case "parry":
+			temp.costType = "damage";
+			temp.cost = 2;
+			break;
+		case "unite":
+			temp.costType = "prince";
+			break;
+		case "clink":
+			temp.costType = "mana";
+			temp.cost = 4;
+			temp.keywords = ["singleCast"];
+			break;
+		case "light":
+			temp.costType = "mana";
+			temp.cost = 1;
+			temp.keywords = ["singleCast"];
+			break;
+		case "else":
+			temp.costType = "blank";
+			temp.cost=1;
+			break;
+	}
+	temp.name=name;
+	temp.userId = id;
+	temp.userIndex = index;
+	return temp;
 }
 socket.on("unequip",(id,index,itemIndex)=> {
 	console.log("unequip"+index);
@@ -101,12 +141,38 @@ function unequip(index) {
 		socket.emit("unequip",playerId,index,0);
 	}
 }
+socket.on("spell",(userId,index,targetId,targetIndex)=> {
+	if (!spellUsable(userId,index)) {
+		console.log("USER IS DEAD");
+		return;
+	}
+	var name = spells[userId][index].name;
+	var costType = spells[userId][index].costType;
+	var cost = spells[userId][index].cost;
+
+	if (costAvailable(userId,costType,cost)) {
+		document.getElementById("history").innerHTML+="<b>Player "+(parseInt(userId)+1)+"</b> used <b>"+spells[userId][index].name+"</b> on ";
+		if (targetId!=-2) {
+			document.getElementById("history").innerHTML+="<b>Player "+(parseInt(targetId)+1)+"'s</b> "
+		} else {
+			document.getElementById("history").innerHTML+="enemy ";
+		}
+		document.getElementById("history").innerHTML+="<b>"+getDice(targetId,targetIndex).name+" ("+targetIndex+")</b><br />";
+		actionQueue.push([userId,index,targetId,targetIndex,false,true]);
+		processQueue();
+		reposition();
+	}
+});
 socket.on("action",(userId,userIndex,targetId,targetIndex,cantrip) => {
 	console.log("adding action from "+userId+" "+userIndex+" to "+targetId+" "+targetIndex);
 	console.log('cantrip' + cantrip);
 	if (gameState=="ingame") {
 		var user = getDice(userId,userIndex);
 		var target = getDice(targetId,targetIndex);
+		if (target.dead) {
+			console.log("TARGET IS DEAD");
+			return;
+		}
 		if (!user.used&&gameState=="ingame") {
 			document.getElementById("history").innerHTML+="<b>Player "+(parseInt(userId)+1)+"</b> used their <b>"+getDice(userId,userIndex).name+" ("+userIndex+")</b> on ";
 			if (targetId!=-2) {
@@ -115,7 +181,7 @@ socket.on("action",(userId,userIndex,targetId,targetIndex,cantrip) => {
 				document.getElementById("history").innerHTML+="enemy ";
 			}
 			document.getElementById("history").innerHTML+="<b>"+getDice(targetId,targetIndex).name+" ("+targetIndex+")</b><br />";
-			actionQueue.push([userId,userIndex,targetId,targetIndex,cantrip]);
+			actionQueue.push([userId,userIndex,targetId,targetIndex,cantrip,false]);
 			processQueue();
 			reposition();
 			//updateText();
@@ -133,10 +199,14 @@ function getRandomTarget(face) { //as player
 	var type = face[0];
 	var pips = face[1];
 	var keywords = face[2];
+	type = type.split(" ")[0];
 	switch (type) {
 		case "defend":
 		case "heal":
 		case "reuse":
+		case "inflict":
+		case "defendheal":
+		case "undying":
 			var randId = randomAlivePlayer();
 			return [randId,randomAliveDiceIndex(randId)];
 		case "attack":
@@ -214,9 +284,7 @@ socket.on("roll",(id,rolls)=> {
 		}
 	}
 	console.log("backupping after roll");
-	backupDice();
-	backupEnemies();
-	actionQueue=[];
+	backup();
 	if (host) {
 		processCantrips(cantripQueue);
 	}
@@ -230,7 +298,8 @@ socket.on("lock",()=> {
 	/*for (var i in ownedDice) {
 		previousDice[i]=structuredClone(ownedDice[i]);
 	}*/
-	backupDice();
+	backup();
+	//backupDice();
 	/*for (var i in dice) {
 		for (var j in dice[i]) {
 			initialDice[i][j]=structuredClone(dice[i][j]);
@@ -259,8 +328,8 @@ var fightTemplate = {
 	x:0,
 	y:0,
 	position:0,
-	width:50,
-	height:50,
+	width:SQUARE,
+	height:SQUARE,
 	poison:0,
 	incoming:0,
 	incomingPoison:0,
@@ -324,6 +393,8 @@ var fightTemplate = {
 	tempKeywords:[],
 	undying:false,
 	weaken:0,
+	cleanseBuffer:[0,0,0,0],
+	stun:false,
 };
 var fightList = [[["goblin","boar"],["bee","wolf","archer","bee"],["wolf","archer","archer"],["boar","bee","archer"]],[["wolf","boar","bee"]],[["wolf","wolf","archer"],["goblin","goblin","bee","archer"]],[["troll"],["alpha","wolf"],["rat","bramble"]]];
 var bossList = [[["troll"],["alpha","wolf"],["rat","bramble"]],[["slimelet","slimequeen"]],[["bones","lich","bones","bones"]],[["archer","slate","trollking"]],[["archer","caw","dragon"],["wisp","wisp","inevitable","wisp","wisp","wisp"]]];
@@ -424,7 +495,8 @@ var fightDiceTemplates = {
 	gnoll: {minRound:4,maxRound:4,size:2,
 		dice:[["attack",5,["heavy"]],["attack",5,["heavy"]],["attack",6,["exert"]],["attack",6,["exert"]],["attack",4,["heavy"]],["attack",4,["heavy"]]],},
 	carrier: {minRound:3,maxRound:3,size:2,
-		dice:[["attack",5,[]],["attack",5,[]],["attack",2,["poison"]],["attack",2,["poison"]],["attack",5,[]],["attack all all",1,["poison"]]],},
+		dice:[["attack all all",1,["poison"]],["attack all all",1,["poison"]],["attack all all",1,["poison"]],["attack all all",1,["poison"]],["attack all all",1,["poison"]],["attack all all",1,["poison"]]]},
+		//dice:[["attack",5,[]],["attack",5,[]],["attack",2,["poison"]],["attack",2,["poison"]],["attack",5,[]],["attack all all",1,["poison"]]],},
 	bandit: {minRound:2,maxRound:4,size:2,
 		dice:[["attack",6,[]],["attack",6,[]],["attack",5,[]],["attack",5,[]],["attack",2,["poison"]],["attack",2,["poison"]]],},
 	blind: {minRound:2,maxRound:4,size:2,
@@ -796,9 +868,9 @@ function spawnFight() {
 			socket.emit("spawn",randFight[i]);
 		}
 	} else {
-		socket.emit("spawn","gnoll");
-		socket.emit("spawn","warchief");
-		socket.emit("spawn","boar");
+		socket.emit("spawn","fanatic");
+		socket.emit("spawn","fanatic");
+		socket.emit("spawn","fanatic");
 	}
 	//socket.emit("send","update text");
 }
@@ -844,7 +916,7 @@ socket.on("ready",(num) => {
 				starting[j]=list[0][randSelect];
 			}
 			for (var j in starting) {
-				socket.emit("init dice",i,j,starting[j]);
+				socket.emit("init dice",i,j,"pilgrim");//starting[j]);
 			}
 		}
 		socket.emit("start");
@@ -858,7 +930,7 @@ socket.on("inventory ready",()=> {
 		processEquipment();
 		if (host) {
 			
-			backupDice();
+			//backupDice();
 			/*for (var i in dice) {
 				for (var j in dice[i]) {
 					initialDice[i][j]=structuredClone(dice[i][j]);
@@ -900,8 +972,8 @@ var template = {
 	used: false,
 	x: 0,
 	y: 0,
-	width: 50,
-	height: 50,
+	width: SQUARE,
+	height: SQUARE,
 	locked: false,
 	side: 0,
 	dead: false,
@@ -930,6 +1002,7 @@ var template = {
 	ghostHp:[],
 	maxEquipment:2,
 	equipment:[],
+	equipmentSpells:[],
 	position:0,
 	armour:0,
 	tempBuff:[0,0,0,0,0,0],
@@ -937,6 +1010,11 @@ var template = {
 	tempKeywords:[],
 	undying:false,
 	weaken:0,
+	spells:[],
+	cleanseBuffer:[0,0,0,0],
+	stun:false,
+	doubleUse:false,
+	doubleUseCount:0,
 }
 
 var diceTemplates={
@@ -981,6 +1059,9 @@ var diceTemplates={
 		prince: {dice: [["attack",3,["inspired"]],["defend",3,["duplicate"]],["nothing",0,[]],["nothing",0,[]],["defendheal",3,[]],["nothing",0,[]]],},
 		paladin: {dice: [["defend",4,["cleanse"]],["attack",4,["heavy"]],["defendheal",3,[]],["defendheal",3,[]],["attack",4,["heavy"]],["attack",4,["heavy"]]],},
 		valkyrie: {dice: [["attack",4,["deathwish"]],["defend",2,["rescue"]],["undying",0,[]],["undying",0,[]],["revive",2,[]],["nothing",0,[]]],},
+		cleric: {dice: [["defendheal",3,[]],["defend",2,["cleanse"]],["mana",2,["singleUse"]],["mana",2,["singleUse"]],["nothing",0,[]],["nothing",0,[]]],},
+		poet: {dice: [["mana",1,["cantrip"]],["defend all",2,[]],["defend",2,["charged"]],["defend",2,["charged"]],["defend",2,["cantrip"]],["nothing",0,[]]],},
+		bard: {dice: [["attack",1,["cantrip"]],["reroll",1,["cantrip"]],["defend all",1,[]],["defend all",1,[]],["defend",1,["cantrip"]],["nothing",0,[]]],},
 	};
 socket.on("init dice",(id,index,unit)=> {
 	console.log("init dice" + dice[id].length);
@@ -1144,6 +1225,7 @@ function spawnDice(id,index,unit,pos) {
 			temp.hp=10;
 			temp.maxHp=10;
 			temp.tier=3;
+			temp.spells=[getSpellByName("formation",id,index)];
 			break;
 		case "bash":
 			temp.hp=10;
@@ -1175,6 +1257,7 @@ function spawnDice(id,index,unit,pos) {
 			temp.maxHp=9;
 			temp.colour="grey";
 			temp.tier=2;
+			temp.spells=[getSpellByName("parry",id,index)];
 			break;
 		case "pilgrim":
 			temp.hp=9;
@@ -1229,12 +1312,34 @@ function spawnDice(id,index,unit,pos) {
 			temp.maxHp=11;
 			temp.colour="grey";
 			temp.tier=3;
+			temp.spells=[getSpellByName("unite",id,index)];
 			break;
 		case "paladin":
 			temp.hp=11;
 			temp.maxHp=11;
 			temp.colour="grey";
 			temp.tier=3;
+			break;
+		case "cleric":
+			temp.hp=8;
+			temp.maxHp=8;
+			temp.colour="grey";
+			temp.tier=2;
+			temp.spells=[getSpellByName("light",id,index)];
+			break;
+		case "poet":
+			temp.hp=9;
+			temp.maxHp=9;
+			temp.colour="grey";
+			temp.tier=3;
+			temp.spells=[getSpellByName("clink",id,index)];
+			break;
+		case "bard":
+			temp.hp=6;
+			temp.maxHp=6;
+			temp.colour="grey";
+			temp.tier=2;
+			temp.spells=[getSpellByName("else",id,index)];
 			break;
 		case "brigand":
 		case "fighter":
@@ -1264,6 +1369,9 @@ socket.on("start",()=> {
 	console.log("start");
 	readyText.alpha=0;
 	initDice();
+	initMana();
+	initSpells();
+	processEquipment();
 	gameState="inventory";
 	age=0;
 	/*for (var i in enemies) {
@@ -1440,7 +1548,8 @@ socket.on("send",(cmd)=> {
 				enemies[i].redirectIndex=-1;
 				enemies[i].ghost=false;
 			}
-			actionQueue=[];
+			backup();
+			//actionQueue=[];
 
 			playerTurn=false;
 			if (host) {
@@ -1461,7 +1570,7 @@ socket.on("send",(cmd)=> {
 				}
 			}
 				upgradeSent = false;
-			actionQueue=[];
+			//actionQueue=[];
 			upgrades=[];
 			upgradeIndices=[];
 			
@@ -1480,7 +1589,7 @@ socket.on("send",(cmd)=> {
 				}
 			}
 				upgradeSent = false;
-			actionQueue=[];
+			//actionQueue=[];
 
 			items=[];
 			break;
@@ -1516,7 +1625,9 @@ socket.on("send",(cmd)=> {
 				app.stage.addChild(enemyBlockText[i]);
 			}*/
 
+			initMana();
 			processEquipment();
+			initSpells();
 			deadTracker=[];
 			gameState="ingame";
 			
@@ -1613,7 +1724,6 @@ var hoveringIndex = -1;
 var hoveringX = 0;
 var hoveringY = 0;
 
-var SQUARE = 50;
 
 document.addEventListener('mousemove', (event) => {
 	var x = event.pageX-7;
@@ -1623,21 +1733,21 @@ document.addEventListener('mousemove', (event) => {
 	hoveringId=-1;
 	hoveringIndex=-1;
 	for (var i in dice) {
-				for (var j in dice[i]) {
-					if (x>dice[i][j].x&&x<dice[i][j].x+dice[i][j].width&&y>dice[i][j].y&&y<dice[i][j].y+dice[i][j].height) {
-						hoveringId = i;
-						hoveringIndex = j;
-						break;
-					}
-				}
+		for (var j in dice[i]) {
+			if (x>dice[i][j].x&&x<dice[i][j].x+dice[i][j].width&&y>dice[i][j].y&&y<dice[i][j].y+dice[i][j].height) {
+				hoveringId = i;
+				hoveringIndex = j;
+				break;
 			}
-			for (var i in enemies) {
-				if (x>enemies[i].x&&x<enemies[i].x+enemies[i].width&&y>enemies[i].y&&y<enemies[i].y+enemies[i].height) {
-					hoveringId = -2;
-					hoveringIndex = i;
-					break;
-				}
-			}
+		}
+	}
+	for (var i in enemies) {
+		if (x>enemies[i].x&&x<enemies[i].x+enemies[i].width&&y>enemies[i].y&&y<enemies[i].y+enemies[i].height) {
+			hoveringId = -2;
+			hoveringIndex = i;
+			break;
+		}
+	}
 	/*if (playerTurn&&gameState=="ingame") {
 			for (var i in dice) {
 				for (var j in dice[i]) {
@@ -1656,6 +1766,16 @@ document.addEventListener('mousemove', (event) => {
 				}
 			}
 	} else */
+	for (var i in spells[playerId]) {
+		if (i>=spellCoords.length) {
+			continue;
+		}
+		if (pointInRect(x,y,spellCoords[i][0],spellCoords[i][1],SQUARE,SQUARE)) {
+			hoveringId = -10;
+			hoveringIndex = i;
+		}
+	}
+
 	if (gameState=="upgrade") {
 		for (var i in upgrades) {
 			if (x>50*i&&x<50*i+50&&y>upY&&y<upY+50) {
@@ -1695,6 +1815,12 @@ document.addEventListener('mousemove', (event) => {
 				var colour = "";
 				if (keywordColours[keywords[i]]) {
 					colour = keywordColours[keywords[i]].toString(16);
+					if (colour.length<6) {
+						var extra = 6-colour.length;
+						for (var j=0; j<extra; j++) {
+							colour = '0'+colour;
+						}
+					}
 				}
 				document.getElementById("dice name").innerHTML+=" <b style=\"color:#"+colour+"\">"+keywords[i]+"</b>";
 			}
@@ -1731,6 +1857,12 @@ document.addEventListener('mousemove', (event) => {
 					var colour = "";
 					if (keywordColours[keywords[i]]) {
 						colour = keywordColours[keywords[i]].toString(16);
+						if (colour.length<6) {
+							var extra = 6-colour.length;
+							for (var j=0; j<extra; j++) {
+								colour = '0'+colour;
+							}
+						}
 					}
 					document.getElementById("dice name").innerHTML+=" <b style=\"color:#"+colour+"\">"+keywords[i]+"</b>";
 				}
@@ -1753,11 +1885,17 @@ document.addEventListener('mousemove', (event) => {
 			hoveringIndex = hoverSide;
 			
 			setInfo();
+		} else if (selectedId==-10) {
+			document.getElementById("dice name").innerHTML=spells[playerId][selectedIndex].name;
+			setInfo();
 		} else if (hoveringId==-5) {
 			document.getElementById("dice name").innerHTML=items[hoveringIndex];
 			setInfo();
 		} else if (hoveringId==-6) {
 			document.getElementById("dice name").innerHTML=inventory[hoveringIndex];
+			setInfo();
+		} else if (hoveringId==-10) {
+			document.getElementById("dice name").innerHTML=spells[playerId][hoveringIndex].name;
 			setInfo();
 		}
 	}
@@ -1810,7 +1948,7 @@ document.addEventListener('mouseup', (event) => {
 				socket.emit("send","undo");
 				return;
 			}
-			for (var i in dice) {
+			/*for (var i in dice) {
 				for (var j in dice[i]) {
 					if (x>dice[i][j].x&&x<dice[i][j].x+dice[i][j].width&&y>dice[i][j].y&&y<dice[i][j].y+dice[i][j].height) {
 						hoveringId = i;
@@ -1824,16 +1962,25 @@ document.addEventListener('mouseup', (event) => {
 					hoveringId = -2;
 					hoveringIndex = i;
 				}
-			}
+			}*/
 			if (hoveringId!=-1) {
-				if (selectedId != playerId) {
+				if (selectedId != playerId && selectedId != -10) {
 					if (hoveringId>=0||hoveringId==-2) {
 						if (!getDice(hoveringId,hoveringIndex).used&&!getDice(hoveringId,hoveringIndex).dead) {
 							selectedId=hoveringId;
 							selectedIndex=hoveringIndex;
 						}
+					} else if (hoveringId==-10) {
+						if (spellUsable(playerId,hoveringIndex)) {
+							selectedId=hoveringId;
+							selectedIndex=hoveringIndex;
+						} else {
+								console.log("USER IS DEAD!!");
+								selectedId=-1;
+								selectedIndex=-1;
+						}
 					}
-				} else {//if (selectedId==playerId){
+				} else if (selectedId==playerId) {
 					//targettedUnit = hover;
 					if (validDiceList(hoveringId)) {
 						if (!getDice(hoveringId,hoveringIndex).dead) {
@@ -1913,6 +2060,16 @@ document.addEventListener('mouseup', (event) => {
 					selectedId=-1;
 					selectedIndex=-1;
 					//targettedUnit = -1;
+				} else if (selectedId == -10) {
+					if (validDiceList(hoveringId)) {
+						if (!getDice(hoveringId,hoveringIndex).dead) {
+							if (isMeleeable(hoveringId,hoveringIndex)) {
+								socket.emit("spell",playerId,selectedIndex,hoveringId,hoveringIndex);
+							}
+						}
+					}
+					selectedId=-1;
+					selectedIndex=-1;
 				}
 			} else {
 				selectedId=-1;
@@ -2088,6 +2245,11 @@ var initialDice = [];
 var previousDice = [0,0,0,0,0];
 var initialEnemies=[0,0];
 
+var mana = [];
+var initialMana = [];
+
+var initialRerolls=0;
+
 var rolledDice = [[0,0],[0,0],[0,0],[0,0],[0,0]];
 var yourTurn = false;
 var locked = false;
@@ -2237,7 +2399,14 @@ function initDice() {
 		}
 	}*/
 	updateText();
-	backupDice();
+	//backupDice();
+}
+
+function initMana() {
+	for (var i in dice) {
+		mana[i]=[0,3];
+	}
+	// maybe some equipment shit
 }
 
 function initEnemies(en) {
@@ -2313,6 +2482,64 @@ function heavyTargets(id,list) {
 		}
 	}
 	return targetIndices;
+}
+
+function isMeleeable(id, index) {
+	var tempList = getDiceList(id);
+	var hasRanged=false;
+	for (var j in tempList) {
+		if (tempList[j].ranged) {
+			hasRanged=true;
+		}
+	}
+	if (hasRanged) {
+		var rangedCheck=true;
+		for (var i in tempList) {
+			if (!tempList[i].ranged&&!tempList[i].dead) {
+				rangedCheck = false;
+			}
+		}
+		if (rangedCheck) { //allowed to hit ranged
+			return true;
+		} else {
+			if (!tempList[index].ranged) {
+				return true;
+			}
+			return false;
+		}
+	} else {
+		return true;
+	}
+}
+
+function isHeavyable(id, index) {
+	if (id>=0) {
+		var highestHp = 1;
+		for (var i in dice[id]) {
+			if (dice[id][i].dead) {
+				continue;
+			}
+			highestHp = Math.max(highestHp,dice[id][i].hp);
+		}
+		if (highestHp!=dice[id][index].hp) {
+			return false;
+		}
+	} else if (id==-2) {
+		var highestHp=1;
+		for (var i in enemies) {
+			if (enemies[i].dead||(enemies[i].ranged&&!ranged&&!onlyRangedLeft())) {
+				continue;
+			}
+			highestHp = Math.max(highestHp,enemies[i].hp);
+		}
+		if (highestHp!=enemies[index].hp) {
+			return false;
+		}
+	} else {
+		console.log("HOW");
+		return false;
+	}
+	return true;
 }
 
 function eliminateTargets(id,list) {
@@ -2556,6 +2783,7 @@ function rollDice() {
 var focusTargetId = -1;
 var focusTargetIndex = -1;
 var focusKeywords = [];
+var focusPips = 0;
 var ignoreCleave = false;
 function getRedirectedTarget(targetId,targetIndex) {
 	var originalTargetId = targetId;
@@ -2580,7 +2808,61 @@ function getRedirectedTarget(targetId,targetIndex) {
 	}
 	return [targetId,targetIndex];
 }
-function action(die,side,userId,userIndex,targetId,targetIndex) {
+function useSpell(id,index,targetId,targetIndex) {
+	var name = spells[id][index].name;
+	var keywords = spells[id][index].keywords;
+	if (keywords.includes("singleCast")) {
+		spells[id][index].singleCast = true;
+	}
+	switch (name) {
+		case "burst":
+			if (targetId==-2) {
+				hurt(-2,targetIndex,2);
+			} else {
+				defend(targetId,targetIndex,2);
+			}
+			break;
+		case "parry":
+			defend(targetId,targetIndex,3);
+			break;
+		case "formation":
+			for (var i in enemies) {
+				hurt(-2, i, 2);
+			}
+			for (var i in dice[playerId]) {
+				defend(playerId,i,2);
+			}
+			break;
+		case "unite":
+			hurt(targetId,targetIndex,15);
+			break;
+		case "flare":
+			hurt(targetId,targetIndex,4);
+			break;
+		case "light":
+			faceAction(["defend",1,["cleave","cleanse"]],id,spells[id][index].userIndex,targetId,targetIndex,);
+			break;
+		case "clink":
+			for (var i in dice[playerId]) {
+				defend(playerId,i,1);
+				for (var j in dice[playerId][i].tempBuff) {
+					dice[playerId][i].tempBuff[j]++;
+				}
+			}
+			break;
+		case "else":
+			defend(targetId,targetIndex,1);
+			cleanse(targetId,targetIndex,1);
+			break;
+	}
+	var lethal = checkDead();
+}
+function action(userId,userIndex,targetId,targetIndex) {
+	var user = getDice(userId,userIndex);
+	faceAction(getFace(userId,userIndex,user.side),userId,userIndex,targetId,targetIndex);
+}
+
+function faceAction(face,userId,userIndex,targetId,targetIndex) {
 	var user = getDice(userId,userIndex);
 	var oldId = targetId;
 	var oldIndex = targetIndex;
@@ -2599,18 +2881,18 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 				break;
 			}
 		}*/
-	if (user.exert>0||user.singleUse[side]||user.petrify[side]) {
+	if (user.exert>0||user.singleUse[user.side]||user.petrify[user.side]) {
 		return;
 	}
-	var type = die[side][0];
-	var pips = die[side][1];
-	var originalPips = pips;
-	var keywords = structuredClone(die[side][2]);
+	//var type = die[side][0];
+	//var pips = die[side][1];
+	//var originalPips = pips;
+	//var keywords = structuredClone(die[side][2]);
 
-	var tempFace = getFace(userId,userIndex,side);
-	type = tempFace[0];
-	pips = tempFace[1];
-	keywords = tempFace[2];
+	var tempFace = face;
+	var type = tempFace[0];
+	var pips = tempFace[1];
+	var keywords = tempFace[2];
 
 	/*if (user.duplicate[0]!=0) {
 		console.log("sheep")
@@ -2768,14 +3050,30 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 
 	//pip calculation stops here
 	pips = Math.max(pips,0);
+	if (effects.doubleUse) {
+		user.doubleUseCount++;
+		if (user.doubleUseCount<2) {
+			user.doubleUse=true;
+		} else {
+			user.doubleUse=false;
+		}
+	}
 	if (targetId!=-1) {
-		if (type=="attack all"&&userId!=-2) {
+		var targetAll = false;
+		var allType = "";
+		if (type.split(" ").length>1) {
+			if (type.split(" ")[1]=="all") {
+				targetAll = true;
+				allType = type.split(" ")[0]
+			}
+		}
+		if (targetAll&&userId!=-2) {
 			if (oldId==-2) {
 				for (var i in enemies) {
 					if (i!=oldIndex) {
 						[tempId,tempIndex] = getRedirectedTarget(oldId,i);
 						if (!getDice(tempId,tempIndex).dead)
-						{act(type,pips,userId,userIndex,tempId,tempIndex,keywords);}
+						{act(allType,pips,userId,userIndex,tempId,tempIndex,keywords);}
 					}
 				}
 			} else if (oldId>=0) {
@@ -2783,7 +3081,7 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 					if (i!=oldIndex) {
 						[tempId,tempIndex] = getRedirectedTarget(oldId,i);
 						if (!getDice(tempId,tempIndex).dead)
-						{act(type,pips,userId,userIndex,tempId,tempIndex,keywords);}
+						{act(allType,pips,userId,userIndex,tempId,tempIndex,keywords);}
 					}
 				}
 			}
@@ -2859,6 +3157,9 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 	if (effects.vitality) {
 		getDice(targetId,targetIndex).maxHp+=pips;
 	}
+	if (effects.manaGain) {
+		gainMana(userId,pips);
+	}
 
 	act(type,pips,userId,userIndex,targetId,targetIndex,keywords);
 
@@ -2893,7 +3194,7 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 		user.exert=2;
 	}
 	if (effects.singleUse) {
-		user.singleUse[side]=true;
+		user.singleUse[user.side]=true;
 	}
 
 	lethal = checkDead();
@@ -2921,7 +3222,7 @@ function action(die,side,userId,userIndex,targetId,targetIndex) {
 		//user.dead=true;
 	}
 	if (effects.growth) {
-		user.keywordModifiers[side]++;
+		user.keywordModifiers[user.side]++;
 	}
 	if (lethal) {
 		if (effects.rampage) {
@@ -2952,7 +3253,11 @@ var effectsTemplate = { cleave: false,
 	 copycat : false,
 	 smith : false, //
 	 descend : false,};
+var piplessActions = ["inflict","nothing","stun","reuse","undying"]
 function getPips(type,pips,keywords,userId,userIndex) {
+	if (piplessActions.includes(type.split(" ")[0])) {
+		return 0;
+	}
 	var user = getDice(userId,userIndex);
 	var effects = structuredClone(effectsTemplate);
 	/*var type = dice[side][0];
@@ -2979,6 +3284,9 @@ function getPips(type,pips,keywords,userId,userIndex) {
 	if (effects.era) {
 		pips+=age;
 	}
+	if (effects.charged){
+		pips+=mana[userId][0];
+	}
 	if (effects.bloodlust) {
 		for (var i in enemies) {
 			if (enemies[i].hp<enemies[i].maxHp&&!enemies[i].dead) {
@@ -3004,6 +3312,11 @@ function getPips(type,pips,keywords,userId,userIndex) {
 			}
 		}
 	}
+	if (effects.inspired) {
+		if (pips<focusPips) {
+			pips*=2;
+		}
+	}
 	return pips;
 }
 
@@ -3019,32 +3332,56 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 		var mainWord = keywords[idx].split(" ")[0];
 		switch (mainWord) {
 			case "poison":
-				target.poison+=pips;
+				var incoming = pips-target.cleanseBuffer[0];
+				if (incoming>0) {
+					target.cleanseBuffer[0]=0;
+					target.poison+=incoming;
+				} else {
+					target.cleanseBuffer[0]-=pips;
+				}
 				break;
 			case "regen":
 				target.regen+=pips;
 				break;
 			case "petrify":
-				target.petrifyCount+=pips;
-				var petrifyCounter=pips;
-				for (var i=0; i<petrifyOrder.length; i++) {
-					if (!target.petrify[petrifyOrder[i]]) {
-						target.petrify[petrifyOrder[i]] = true;
-						petrifyCounter--;
+				var incoming = pips-target.cleanseBuffer[3];
+				if (incoming>0) {
+					var petrifyCounter=incoming;
+					target.petrifyCount+=incoming;
+					target.cleanseBuffer[3]=0;
+					for (var i=0; i<petrifyOrder.length; i++) {
+						if (!target.petrify[petrifyOrder[i]]) {
+							target.petrify[petrifyOrder[i]] = true;
+							petrifyCounter--;
+						}
+						if (petrifyCounter<=0) {
+							break;
+						}
 					}
-					if (petrifyCounter<=0) {
-						break;
-					}
+				} else {
+					target.cleanseBuffer[3]-=pips;
 				}
+				
+				
 				break;
 			case "weaken":
 				/*for (var i=0; i<target.tempBuff.length;i++) {
 					target.tempBuff[i]-=pips;
 				}*/
-				target.weaken+=pips;
+				var incoming = pips-target.cleanseBuffer[1];
+				if (incoming>0) {
+					target.cleanseBuffer[1]=0;
+					target.weaken+=incoming;
+				} else {
+					target.cleanseBuffer[1]-=pips;
+				}
 				break;
 			case "inflict":
-				target.tempKeywords.push(keywords[idx].split(" ")[1]);
+				if (target.cleanseBuffer[2]==0) {
+					target.tempKeywords.push(keywords[idx].split(" ")[1]);
+				} else {
+					target.cleanseBuffer[2]--;
+				}
 				break;
 			case "cleanse":
 				cleanse(targetId,targetIndex,pips);
@@ -3057,10 +3394,15 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 	var tempType = type;
 	var typeCheck = tempType.split(" ");
 	var summonType = "";
+	var inflictList = [];
+	tempType = typeCheck[0];
 
-	if (typeCheck[0]=="summon") {
-		tempType = "summon";
+	if (tempType=="summon") {
 		summonType = typeCheck[1];
+	}
+	if (tempType=="inflict") {
+		inflictList = structuredClone(typeCheck);
+		inflictList.splice(0,1);
 	}
 	if (targetId==-2) {
 		if (target.basilisk) {
@@ -3113,7 +3455,25 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 		case "undying":
 			target.undying=true;
 			break;
+		case "inflict":
+			for (var i in inflictList) {
+				target.tempKeywords.push(inflictList[i]);
+			}
+			break;
+		case "mana":
+			gainMana(userId,pips);
+			break;
+		case "reroll":
+			if (!locked) {
+				console.log(rerolls);
+				rerolls+=pips;
+				console.log(rerolls);
+			}
+			break;
 	}
+}
+function gainMana(id,pips) {
+	mana[id][0]+=pips;
 }
 
 function stun(id,index) {
@@ -3122,8 +3482,9 @@ function stun(id,index) {
 		target.used=true;
 	}
 	if (id==-2) {
-		id.targets=[];
+		target.targets=[];
 	}
+	target.stun=true;
 }
 function heal(id,index,pips) {
 	var tempUnit = getDice(id,index);
@@ -3145,12 +3506,17 @@ function repel(id,index,pips) {
 }
 function cleanse(id,index,pips) {
 	var tempUnit = getDice(id,index);
+	cleanseBuffer = tempUnit.cleanseBuffer;
+	cleanseBuffer[0]+=Math.max(0,pips-tempUnit.poison);
 	tempUnit.poison-=pips;
 	tempUnit.poison=Math.max(0,tempUnit.poison);
+	cleanseBuffer[1]+=Math.max(0,pips-tempUnit.weaken);
 	tempUnit.weaken-=pips;
 	tempUnit.weaken=Math.max(0,tempUnit.weaken);
 	var inflictPips = Math.min(tempUnit.tempKeywords.length,pips);
+	cleanseBuffer[2]+=Math.max(0,pips-tempUnit.tempKeywords.length);
 	tempUnit.tempKeywords.splice(tempUnit.tempKeywords.length-inflictPips,inflictPips);
+	cleanseBuffer[3]+=Math.max(0,pips-tempUnit.petrifyCount);
 	tempUnit.petrifyCount-=pips;
 	tempUnit.petrifyCount=Math.max(0,tempUnit.petrifyCount);
 	if (tempUnit.petrifyCount==0) {
@@ -3239,6 +3605,7 @@ function getDiceList(id) {
 	}
 }
 
+
 function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipment, then 6: e.g. warchief buff?
 	if (id==-3) {
 		return getDice(id,index).dice[side];
@@ -3252,6 +3619,11 @@ function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipm
 	
 	//4,5
 	for (var i in equipment) {
+		for (var j in tempDice) {
+			if (piplessActions.includes(tempDice[j][0].split(" ")[0])) {
+				tempDice[j][1]=0;
+			}
+		}
 		switch (equipment[i]) {
 			case "longsword":
 				tempDice[0] = ["attack",3,[]];
@@ -3547,6 +3919,422 @@ function getFace(id,index,side) { // 3: apply blessings/curses, then 4,5: equipm
 				addKeyword(tempDice[2],"pristine");
 				addKeyword(tempDice[3],"pristine");
 				break;
+			case "big heart":
+				tempDice[1] = ["heal", 7,[]];
+				break;
+			case "castor root":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="nothing") {
+						tempDice[j] = ["heal",1,[]];
+					}
+				}
+				break;
+			case "change of heart":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="heal") {
+						tempDice[j][0]=="defend";
+					}
+				}
+				break;
+			case "seedling":
+				tempDice[0] = ["attack",2,["growth"]];
+				break;
+			case "tincture":
+				addKeyword(tempDice[5],"cleanse");
+				break;
+			case "sorcery notes":
+				tempDice[0] = ["mana",1,["cantrip"]];
+				tempDice[1] = ["nothing",0,[]];
+				break;
+			case "whey":
+				addKeyword(tempDice[0],"vitality");
+				break;
+			case "reagents":
+				tempDice[4] = ["nothing",0,[]];
+				tempDice[5] = ["heal",1,["regen"]];
+				break;
+			case "bowl":
+				tempDice[1] = structuredClone(diceTemplates[tempUnit.name].dice[1]);
+				tempDice[2] = structuredClone(diceTemplates[tempUnit.name].dice[2]);
+				tempDice[3] = structuredClone(diceTemplates[tempUnit.name].dice[3]);
+				break;
+			case "memory":
+				tempDice[0] = structuredClone(diceTemplates[tempUnit.name].dice[0]);
+				break;
+			case "quiver":
+				for (var j=1; j<6; j++) {
+					tempDice[j] = ["attack",1,["ranged"]];
+				}
+				break;
+			case "wand of wand":
+				tempDice[1] = ["attack",1,["singleUse","inflict singleUse"]];
+				break;
+			case "iron heart":
+				for (var j in tempDice) {
+					tempDice[j][1]++;
+					addKeyword(tempDice[j],"exert");
+				}
+				break;
+			case "balisong":
+				tempDice[0] = ["attack",1,["cantrip"]];
+				break;
+			case "tower shield":
+				tempDice[1] = ["defend",7,["heavy"]];
+				break;
+			case "powdered mana":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="nothing") {
+						tempDice[j] = ["mana",1,[]];
+					}
+				}
+				break;
+			case "flickering blade":
+				tempDice[5] = ["attack",1,["copycat"]];
+				break;
+			case "blessed water":
+				tempDice[1] = ["heal",3,["vitality"]];
+				break;
+			case "sapphire":
+				tempDice[1] = ["mana",2,[]];
+				break;
+			case "citrine ring":
+				tempDice[5][1]++;
+				break;
+			case "rejuvenation wand":
+				tempDice[2] = ["heal",10,["singleUse"]];
+				tempDice[3] = ["heal",10,["singleUse"]];
+				break;
+			case "twin daggers":
+				tempDice[2] = ["attack",1,["cantrip"]];
+				tempDice[3] = ["attack",1,["cantrip"]];
+				break;
+			case "fletching":
+				addKeyword(tempDice[0],"ranged");
+				break;
+			case "terrarium":
+				tempDice[4] = ["defend",2,["growth"]];
+				tempDice[5] = ["mana",1,["growth"]];
+				break;
+			case "syringe":
+				var aliveCount = 0;
+				for (var j in dice[id]) {
+					if (!dice[id][j].dead) {
+						aliveCount++;
+					}
+				}
+				if (aliveCount<=2) {
+					for (var j in tempDice) {
+						addKeyword(tempDice[j],"cantrip");
+					}
+				}
+				break;
+			case "siphon":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="mana"||tempDice[j][2].includes("manaGain")) {
+						tempDice[j][1]++;
+						addKeyword(tempDice[j],"pain");
+					}
+				}
+				break;
+			/*case "pocket phylactery":
+				addKeyword(tempDice[0],"pain");
+				addKeyword(tempDice[1],"pain");
+				break;*/
+			case "pure heart pendant":
+				tempDice[1] = ["heal",3,["cleanse"]];
+				break;
+			case "shortsword":
+				tempDice[4] = ["attack",2,[]];
+				tempDice[5] = ["attack",2,[]];
+				break;
+			case "tiara":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="mana"||tempDice[j][2].includes("manaGain")) {
+						addKeyword(tempDice[j],"selfheal");
+					}
+				}
+				break;
+			case "ink bottle":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="nothing") {
+						tempDice[j] = ["defend",1,["cantrip"]];
+					}
+				}
+				break;
+			case "magic staff":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="mana"||tempDice[j][2].includes("manaGain")) {
+						tempDice[j][1]=2;
+					}
+				}
+				break;
+			case "soup":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="defend"){//||tempDice[j][2].includes("selfshield")) {
+						tempDice[j][0]="defendheal";
+					}
+				}
+				break;
+			/*case "faerie pact":
+				tempDice[5] = ["mana",4,[]];
+				break;*/
+			case "fangs":
+				addKeyword(tempDice[0],"selfheal");
+				break;
+			case "eyepatch":
+				tempDice[0][2] = [];
+				break;
+			case "alembic":
+				tempDice[1] = ["inflict manaGain pain",0,[]];
+				break;
+			/*case "flawed diamond":
+				addKeyword("pristine",tempDice[0]);
+				addKeyword("pristine",tempDice[1]);
+				break;*/
+			case "chakram":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="defend"){//||tempDice[j][2].includes("selfshield")) {
+						tempDice[j][0]="attack";
+						addkeyword(tempDice[j],"ranged");
+					}
+				}
+				break;
+			case "splitting arrows":
+				tempDice[4] = ["attack",1,["ranged","cleave"]];
+				tempDice[5] = ["attack",1,["ranged","cleave"]];
+				break;
+			case "hissing ring":
+				tempDice[1] = ["attack",2,["poison"]];
+				break;
+			case "dynamo":
+				addKeyword(tempDice[4],"singleUse");
+				addKeyword(tempDice[4],"era");
+				addKeyword(tempDice[5],"singleUse");
+				addKeyword(tempDice[5],"era");
+				break;
+			case "mana jelly":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="mana"||tempDice[j][2].includes("manaGain")) {
+						addKeyword(tempDice[j],"singleUse");
+						addKeyword(tempDice[j],"cantrip");
+					}
+				}
+				break;
+			case "simplicity":
+				for (var j in tempDice) {
+					if (tempDice[j][2].length==0) {
+						if (tempDice[j][0]=="attack"||tempDice[j][0]=="defend"||
+							tempDice[j][0]=="heal"||tempDice[j][0]=="mana") {
+							tempDice[j][1]++;
+						}
+					}
+				}
+				break;
+			case "sack of mana":
+				tempDice[1] = ["mana",4,[]];
+				tempDice[2] = ["nothing",0,[]];
+				tempDice[3] = ["nothing",0,[]];
+				break;
+			case "door":
+				var enemyCount = 0;
+				for (var j in enemies) {
+					if (!enemies[j].dead){
+						enemyCount++;
+					}
+				}
+				if (enemyCount>=4) {
+					for (var j in tempDice) {
+						if (tempDice[j][0]=="defend"||tempDice[j][2].includes("selfshield")) {
+							tempDice[j][1]+=2;
+						}
+					}
+				}
+				break;
+			case "lens":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="heal") {
+						addKeyword(tempDice[j],"focus");
+					}
+				}
+				break;
+			case "pauldron":
+				tempDice[2][1]+=2;
+				tempDice[3][1]-=2;
+				break;
+			case "nunchaku":
+				addKeyword(tempDice[2],"chain");
+				addKeyword(tempDice[3],"chain");
+				break;
+			case "bandana": 
+				for (var j in tempDice) {
+					if (tempDice[j][1]==0) {
+						addKeyword(tempDice[j],"cantrip");
+					}
+				}
+				break;
+			case "early grave":
+				for (var j in tempDice) {
+					if (tempDice[j][1]>=3) {
+						addKeyword(tempDice[j],"pain");
+						addKeyword(tempDice[j],"cantrip");
+					}
+				}
+				break;
+			case "glyph of purity":
+				addKeyword(tempDice[2],"cleanse");
+				addKeyword(tempDice[3],"cleanse");
+				break;
+			case "shining bow":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="attack") {
+						addKeyword(tempDice[j],"ranged");
+					}
+				}
+				break;
+			case "wand grips":
+				addKeyword(tempDice[0],"singleUse");
+				tempDice[0][1]+=2;
+				break;
+			case "hourglass":
+				if (age==0) {
+					for (var j in tempDice) {
+						tempDice[j][1]++;
+					}
+				}
+				break;
+			case "blindfold":
+				for (var j in tempDice) {
+					tempDice[j][2]=[];
+				}
+				break;
+			case "jump":
+				tempDice[2] = structuredClone(tempDice[0]);
+				tempDice[3] = structuredClone(tempDice[0]);
+				tempDice[0] = ["nothing",1,[]];
+				break;
+			case "lich eye":
+				for (var j in tempDice) {
+					addKeyword(tempDice[j],"manaGain");
+					addKeyword(tempDice[j],"death");
+					tempDice[j][1]+=2;
+				}
+				break;
+			case "conduit":
+				tempDice[1] = ["mana",2,["duplicate"]];
+				break;
+			case "kite shield":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="defend"||tempDice[j][2].includes("selfshield")) {
+						tempDice[j][1]=3;
+					}
+				}
+				break;
+			case "karma":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="heal"||tempDice[j][0]=="defendheal") {
+						addKeyword(tempDice[j],"selfheal");
+					}
+				}
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="defend"||tempDice[j][0]=="defendheal") {
+						addKeyword(tempDice[j],"selfshield");
+					}
+				}
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="attack") {
+						addKeyword(tempDice[j],"pain");
+					}
+				}
+				break;
+			case "dragon pipe":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="heal"||tempDice[j][2].contains("selfheal")) {
+						tempDice[j][1]++;
+					}
+				}
+				break;
+			case "two reeds":
+				for (var j in tempDice) {
+					if (tempDice[j][1]%2==0) {
+						tempDice[j][1]++;
+					}
+				}
+				break;
+			case "tentacle":
+				addKeyword(tempDice[4],"repel");
+				addKeyword(tempDice[5],"repel");
+				break;
+			case "wandcraft":
+				for (var j in tempDice) {
+					tempDice[j][0] = "mana";
+					addKeyword(tempDice[j][2],"singleUse");
+				}
+				break;
+			case "second chance":
+				tempDice[5] = ["reuse",0,[]];
+				break;
+			case "demon claw":
+				tempDice[0][1]--;
+				addKeyword(tempDice[0],"rampage");
+				break;
+			case "broadsword":
+				tempDice[1] = ["attack",4,[]];
+				tempDice[2] = ["attack",4,[]];
+				tempDice[3] = ["attack",4,[]];
+				break;
+			case "wooden bracelet":
+				for (var j in tempDice) {
+					if (tempDice[j][2].length==0) {
+						tempDice[j][1]++;
+					}
+				}
+				break;
+			case "pocket mirror":
+				tempDice[5] = structuredClone(tempDice[0]);
+				break;
+			case "tourmaline paraiba":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="mana"||tempDice[j][2].includes("manaGain")) {
+						addKeyword(tempDice[j],"era");
+					}
+				}
+				break;
+			case "faerie dust":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="nothing") {
+						tempDice[j] = ["mana",3,[]];
+					}
+				}
+				break;
+			case "tusk":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="heal"||tempDice[j][2].includes("selfheal")) {
+						tempDice[j][1]++;
+					}
+				}
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="defend"||tempDice[j][2].includes("selfshield")) {
+						tempDice[j][1]++;
+					}
+				}
+				break;
+			case "sapphire ring":
+				for (var j in tempDice) {
+					if (tempDice[j][0]=="mana"||tempDice[j][2].includes("manaGain")) {
+						tempDice[j][1]++;
+					}
+				}
+				break;
+			case "scorpion tail":
+				addKeyword(tempDice[2],"pain");
+				addKeyword(tempDice[2],"weaken");
+				addKeyword(tempDice[3],"pain");
+				addKeyword(tempDice[3],"weaken");
+				break;
+			case "horned viper":
+				addKeyword(tempDice[0],"poison");
+				addKeyword(tempDice[1],"poison");
+				break;
 		}
 	}
 	//6
@@ -3731,8 +4519,6 @@ function hurt(targetId,targetIndex, pips,unblockable) {
 			target.chompUpHp.splice(target.chompUpHp.length-chompUpList.length,chompUpList.length);
 			target.chompDownHp.splice(target.chompDownHp.length-chompDownList.length,chompDownList.length);
 			target.quartzHp.splice(target.quartzHp.length-quartzList.length,quartzList.length);
-
-
 		}
 		target.hp-=incoming;
 		if (incoming>=4&&target.zombie) {
@@ -3745,6 +4531,8 @@ function hurt(targetId,targetIndex, pips,unblockable) {
 		}
 	}
 }
+
+var manaText = [];
 
 function updateText() {
 	for (var i in hpText) {
@@ -3788,6 +4576,16 @@ function updateText() {
 		}
 		playerText[i].x = dice[i][dice[i].length-1].x+SQUARE;
 		playerText[i].y = dice[i][dice[i].length-1].y;
+	}
+	for (var i in mana) {
+		if (i>=manaText.length) {
+			manaText[i] = new PIXI.Text("Mana: "+mana[i][0]+"/"+mana[i][1]);
+			manaText[i].style.fontSize=15;
+			app.stage.addChild(manaText[i]);
+		}
+		manaText[i].text = "Mana: "+mana[i][0]+"/"+mana[i][1];
+		manaText[i].x = dice[i][dice[i].length-1].x+SQUARE;
+		manaText[i].y = dice[i][dice[i].length-1].y+SQUARE/2;
 	}
 	for (var i in enemies) {
 		if (i>=enemyHpText.length) {
@@ -3884,13 +4682,12 @@ function processCantrips(queue) {
 		var face = getFace(queue[i][0],queue[i][1],user.side)
 		var [targetId,targetIndex] = getRandomTarget(user.dice[user.side]);
 		if (!user.dead&&targetId!=-1&&targetIndex!=-1) {
-			actionQueue.push([queue[i][0],queue[i][1],targetId,targetIndex,true]);
+			actionQueue.push([queue[i][0],queue[i][1],targetId,targetIndex,true,false]);
 			verifiedActions.push([i,targetId,targetIndex]);
 			
 		}
 	}
-	recoverDice();
-	recoverEnemies();
+	recover();
 	if (verifiedActions.length>0) {
 		actionQueue.splice(actionQueue.length-verifiedActions.length,verifiedActions.length);
 	}
@@ -3907,6 +4704,7 @@ function processQueue() {
 		focusTargetId=-1;
 		focusTargetIndex=-1;
 		focusKeywords = [];
+		focusPips = 0;
 	/*dice=[];
 	for (var i in initialDice) {
 		dice.push([]);
@@ -3914,9 +4712,7 @@ function processQueue() {
 			dice[i].push(structuredClone(initialDice[i][j]));
 		}
 	}*/
-	recoverDice();
-	recoverEnemies();
-
+	recover();
 	//process items?
 
 	/*enemies=[];
@@ -3926,30 +4722,44 @@ function processQueue() {
 
 	blindCheck = true;
 	for (pee in actionQueue) {
-		var user = getDice(actionQueue[pee][0],actionQueue[pee][1]);
-		var target = getDice(actionQueue[pee][2],actionQueue[pee][3]);
-
-		//var enemy = actionQueue[i][2];
-		/*if (!enemy) {
-			action(rolledDice[user][0],rolledDice[user][1],ownedDice[user],ownedDice[target]);
+		var [userId,userIndex,targetId,targetIndex,cantrip,spell] = actionQueue[pee];
+		if (spell) {
+			if (payCost(userId,userIndex)) {
+				useSpell(userId,userIndex,targetId,targetIndex);
+			} else {
+				console.log("YOU HAVE NO MANA????");
+			}
 		} else {
-			action(rolledDice[user][0],rolledDice[user][1],ownedDice[user],enemies[target]);
-		}*/
-		ignoreCleave = false;
+			var user = getDice(actionQueue[pee][0],actionQueue[pee][1]);
+			var target = getDice(actionQueue[pee][2],actionQueue[pee][3]);
 
-		action(user.dice,user.side,actionQueue[pee][0],parseInt(actionQueue[pee][1]),actionQueue[pee][2],parseInt(actionQueue[pee][3]));
-		if (!user.rampage&&!actionQueue[pee][4]) {
-			user.used=true;
-		} else if (user.rampage) {
-			user.rampage=false;
+			//var enemy = actionQueue[i][2];
+			/*if (!enemy) {
+				action(rolledDice[user][0],rolledDice[user][1],ownedDice[user],ownedDice[target]);
+			} else {
+				action(rolledDice[user][0],rolledDice[user][1],ownedDice[user],enemies[target]);
+			}*/
+			ignoreCleave = false;
+
+			action(actionQueue[pee][0],parseInt(actionQueue[pee][1]),actionQueue[pee][2],parseInt(actionQueue[pee][3]));
+			if (!user.rampage&&!actionQueue[pee][4]&&!user.doubleUse) {
+				user.used=true;
+			} else {
+				if (user.rampage) {
+					user.rampage=false;
+				}
+			}
+
+			focusTargetId=actionQueue[pee][2];
+			focusTargetIndex=actionQueue[pee][3];
+			focusKeywords=structuredClone(user.dice[user.side][2]);
+			focusPips=user.dice[user.side][1];
 		}
-
 		checkEnemyConditions();
 		calcIncoming();
-		focusTargetId=actionQueue[pee][2];
-		focusTargetIndex=actionQueue[pee][3];
-		focusKeywords=structuredClone(user.dice[user.side][2]);
 	}
+
+			reposition();
 	/*for (var i in dice) {
 		for (var j in dice[i]) {
 			if (dice[i][j].hp<=0) {
@@ -3974,6 +4784,10 @@ function calcIncoming() {
 			dice[i][j].incoming=0;
 			dice[i][j].incomingPoison=0;
 		}
+	}
+	for (var i in enemies) {
+		enemies[i].incoming=0;
+		enemies[i].incomingPoison=0;
 	}
 	for (var i in enemies) {
 		if (enemies[i].exert) {
@@ -4078,10 +4892,20 @@ function calcIncoming() {
 		}
 		if (type=="attack all all") {
 			for (var j in enemies) {
-				enemies[j].incoming++;
-				enemies[j].incomingPoison++;
+				enemies[j].incoming+=pips;
+				if (keywords.includes("poison")) {
+					enemies[j].incomingPoison+=pips;
+				}
 			}
 		}
+	}
+	for (var i in dice) {
+		for (var j in dice[i]) {
+			dice[i][j].incomingPoison = Math.max(0,dice[i][j].incomingPoison-dice[i][j].cleanseBuffer[0]);
+		}
+	}
+	for (var i in enemies) {
+		enemies[i].incomingPoison = Math.max(0,enemies[i].incomingPoison-enemies[i].cleanseBuffer[0]);
 	}
 }
 
@@ -4177,7 +5001,11 @@ function removeTemporaryEffects() {
 			dice[i][j].weaken=0;
 			dice[i][j].tempKeywords = [];
 			dice[i][j].undying=false;
+			dice[i][j].doubleUseCount=0;
 		}
+	}
+	for (var i in mana) {
+		mana[i][0]=Math.min(mana[i][0],mana[i][1]);
 	}
 }
 function removeEnemyTemporaryEffects() {
@@ -4195,21 +5023,28 @@ function removeEnemyTemporaryEffects() {
 		}
 		enemies[i].undying=false;
 		enemies[i].tempKeywords = [];
+		enemies[i].cleanseBuffer = [0,0,0,0];
+	}
+	for (var i in dice) {
+		for (var j in dice[i]) {
+			dice[i][j].cleanseBuffer = [0,0,0,0]; // gotta reset this after enemy attacks
+		}
 	}
 }
 function resolveAttacks() {
 	for (var i in enemies) {
-		for (var j in enemies[i].targets) {
-			if (!enemies[i].dead)
+		var tempTargets = structuredClone(enemies[i].targets); //have to do this cause the targets might change in the middle
+		for (var j in tempTargets) {
+			if (!enemies[i].dead&&!getDice(tempTargets[j][0],tempTargets[j][1]).dead)
 			{ignoreCleave = false;
-				action(enemies[i].dice,enemies[i].side,-2,i,enemies[i].targets[j][0],enemies[i].targets[j][1]);}
+				action(-2,i,tempTargets[j][0],tempTargets[j][1]);}
 			//action(enemies[i].dice[enemies[i].side][0],enemies[i].dice[enemies[i].side][1],enemies[i],enemies[i].targets[j]);
 		}
 		var tempFace = getFace(-2,i,enemies[i].side);
 		if (tempFace[0]=="attack all all") {
 			for (var j in enemies) {
 				if (!enemies[j].dead) {
-					action(enemies[i].dice,enemies[i].side,-2,i,-2,j);
+					action(-2,i,-2,j);
 				}
 			}
 		}
@@ -4219,13 +5054,13 @@ function resolveAttacks() {
 			type = "summon";
 		}
 		//no target actions
-		if (enemies[i].targets.length==0&&!enemies[i].dead) {
+		if (enemies[i].targets.length==0&&!enemies[i].dead&&!enemies[i].stun) {
 			switch (type) {
 				case "summon":
-					action(enemies[i].dice,enemies[i].side,-2,i,-1,-1);
+					action(-2,i,-1,-1);
 					break;
 				case "selfheal":
-					action(enemies[i].dice,enemies[i].side,-2,i,-2,i);
+					action(-2,i,-2,i);
 					break;
 			}
 		}
@@ -4238,7 +5073,7 @@ function resolveAttacks() {
 	}*/
 	checkDead();
 	
-	backupDice();
+	//backupDice();
 
 	//updateText();
 }
@@ -4359,9 +5194,33 @@ function getTargetters(id,index) {
 	var indices = [];
 	for (var i in enemies) {
 		for (var j in enemies[i].targets) {
-			if (enemies[i].targets[j][0]==id&&enemies[i].targets[j][1]==index) {
+			var oldId = enemies[i].targets[j][0];
+			var oldIndex = enemies[i].targets[j][1];
+			var keywords = enemies[i].dice[enemies[i].side][2];
+			var [redId,redIndex] = getRedirectedTarget(oldId,oldIndex);
+			if (redId==id&&redIndex==index) {
 				indices.push(i);
-				break;
+			}
+			var cleave = false;
+			var descend = false;
+			if (keywords.includes("cleave")) {
+				cleave = true;
+			}
+			if (keywords.includes("descend")) {
+				descend = true;
+			}
+			if (cleave||descend) {
+				var [upper,lower] = cleaveIndices(oldId,oldIndex);
+				if (cleave) {
+					[redId,redIndex] = getRedirectedTarget(oldId,upper);
+					if (redId==id&&redIndex==index) {
+						indices.push(i);
+					}
+				}
+				[redId,redIndex] = getRedirectedTarget(oldId,lower);
+				if (redId==id&&redIndex==index) {
+					indices.push(i);
+				}
 			}
 		}
 	}
@@ -4372,7 +5231,9 @@ function checkDead() { // only for hp
 	for (var i in dice) {
 		for (var j in dice[i]) {
 			if (dice[i][j].hp<=0&&!dice[i][j].dead) {
-				if (!lethal) {lethal = kill(i,j);}
+				if (kill(i,j)) {
+					lethal=true;
+				}
 				//dice[i][j].dead=true;
 			}
 		}
@@ -4380,7 +5241,9 @@ function checkDead() { // only for hp
 	for (var i in enemies) {
 		if (enemies[i].hp<=0&&!enemies[i].dead) {
 			var [upper,lower] = cleaveIndices(-2,i);
-			if (!lethal) {lethal = kill(-2,i);}
+			if (kill(-2,i)) {
+				lethal=true;
+			}
 			//enemies[i].dead=true;
 			
 			if (enemies[i].hp<=-2) {
@@ -4438,6 +5301,48 @@ function recoverDice() {
 		}
 	}
 }
+function backupMana() {
+	initialMana=[];
+	for (var i in mana) {
+		initialMana.push([]);
+		for (var j in mana[i]) {
+			initialMana[i].push(mana[i][j]);
+		}
+	}
+}
+function recoverMana() {
+	mana=[];
+	for (var i in initialMana) {
+		mana.push([]);
+		for (var j in initialMana[i]) {
+			mana[i].push(initialMana[i][j]);
+		}
+	}
+}
+function backupSpells() {
+	initialSpells=[];
+	for (var i in spells) {
+		initialSpells.push([]);
+		for (var j in spells[i]) {
+			initialSpells[i].push(structuredClone(spells[i][j]));
+		}
+	}
+}
+function recoverSpells() {
+	spells=[];
+	for (var i in initialSpells) {
+		spells.push([]);
+		for (var j in initialSpells[i]) {
+			spells[i].push(structuredClone(initialSpells[i][j]));
+		}
+	}
+}
+function backupRerolls() {
+	initialRerolls=rerolls;
+}
+function recoverRerolls() {
+	rerolls=initialRerolls;
+}
 function backupEnemies() {
 	initialEnemies=[];
 	for (var i in enemies) {
@@ -4449,6 +5354,21 @@ function recoverEnemies() {
 	for (var i in initialEnemies) {
 		enemies.push(structuredClone(initialEnemies[i]));
 	}
+}
+function backup() {
+	backupDice();
+	backupEnemies();
+	backupMana();
+	backupSpells();
+	backupRerolls();
+	actionQueue=[];
+}
+function recover() {
+	recoverDice();
+	recoverEnemies();
+	recoverMana();
+	recoverSpells();
+	recoverRerolls();
 }
 var keywordInfo = {
 	"pain": "damages itself by pips",
@@ -4592,7 +5512,81 @@ var equipmentInfo = {
 	"dumbbell": "+4 pips to sides with at least 4 pips",
 	"silk cape": "copy left side to middle row",
 	"eye of horus": "+1 pip to all sides",
-	"shiny gauntlets": "add pristine to top and bottom sides"
+	"shiny gauntlets": "add pristine to top and bottom sides",
+	"big heart": "replace middle with heal 7",
+	"castor root": "replace blanks with heal 1",
+	"change of heart": "replace heals with shields, retaining pips and keywords",
+	"seedling": "replace left side with attack 2 growth",
+	"tincture": "add cleanse to rightmost side",
+	"sorcery notes": "replace left with mana 1 cantrip and middle with blank",
+	"whey": "add vitality to left side",
+	"reagents": "replace right sides with blank and heal 1 regen",
+	"bowl": "change middle column to original sides",
+	"memory": "change left side to original side",
+	"quiver": "replace five right sides with attack 1 ranged",
+	"wand of wand": "replace middle with attack 1 singleUse inflict singleUse",
+	"iron heart": "add exert and +1 pips to all sides",
+	"balisong": "replace left side with attack 1 cantrip",
+	"tower shield": "replace middle with defend 7 heavy",
+	"powdered mana": "replace blanks with mana 1",
+	"flickering blade": "replace rightmost side with attack 1 copycat",
+	"blessed water": "replace middle with heal 3 vitality",
+	"sapphire": "replace middle with mana 2",
+	"citrine ring": "+1 pip to rightmost side",
+	"rejuvenation wand": "replace top and bottom sides with heal 10 singleUse",
+	"twin daggers": "replace top and bottom sides with attack 1 cantrip",
+	"fletching": "add ranged to left side",
+	"terrarium": "change right sides to shield 2 growth and mana 1 growth",
+	"learn flare": "learn flare: 4 mana deal 5 damage",
+	"syringe": "if there are less than 2 heroes alive in your row, all sides have cantrip",
+	"siphon": "add pain and +1 pip to all mana/manaGain sides",
+	"pure heart pendant": "replace middle with heal 3 cleanse",
+	"shortsword": "replace right sides with attack 2",
+	"tiara": "add selfheal to mana/manaGain sides",
+	"ink bottle": "replace blank sides with defend 1 cantrip",
+	"magic staff": "set all mana/manaGain sides to 2 pips",
+	"soup": "replace defend sides with defendheal, retaining pips and keywords",
+	"fangs": "add selfheal to left side",
+	"eyepatch": "remove keywords from left side",
+	"alembic": "replace middle side with inflict pain manaGain",
+	"chakram": "replace defend sides with ranged damage, retaining pips and keywords",
+	"splitting arrows": "replace right sides with attack 1 ranged cleave",
+	"hissing ring": "replace middle with attack 2 poison",
+	"dynamo": "add singleUse and era to right sides"
+	"mana jelly": "add singleUse and cantrip to all mana/manaGain sides",
+	"simplicity": "+1 pip to attack, defend, heal and mana sides with no keywords",
+	"sack of mana": "replace top and bottom with blanks, replace middle with mana 4",
+	"door": "if there are four or more monsters, +2 pips to all defend sides",
+	"lens": "add focus to all heal/selfheal sides",
+	"pauldron": "+2 pips to top side, -2 pips to bottom side",
+	"nunchaku": "add chain to the top and bottom sides",
+	"glyph of purity": "add cleanse to top and bottom sides",
+	"shining bow": "add ranged to all damage sides",
+	"wand grips": "add singleUse and 2 pips to left side",
+	"bandana": "add cantrip to all pipless sides",
+	"early grave": "add pain and cantrip to all sides with at least 3 pips",
+	"hourglass": "+1 pips to all sides on first turn",
+	"blindfold": "remove all keywords",
+	"jump": "replace top and bottom with left side, replace left side with blank",
+	"lich eye": "+2 pips and add death and manaGain to all sides",
+	"conduit": "replace middle with mana 2 duplicate",
+	"kite shield": "set all defend sides to 3 pips",
+	"karma": "add selfheal to heal sides, add selfshield to defend sides, add pain to attack sides",
+	"dragon pipe": "+1 pips to all heal/selfheal sides",
+	"two reeds": "+1 pips to all sides with even pips",
+	"tentacle": "add repel to right sides",
+	"wandcraft": "replace all sides with mana singleUse sides, retaining pips and keywords",
+	"second chance": "replace right side with reuse",
+	"demon claw": "add rampage and -1 pips to left side",
+	"broadsword": "replace middle column with attack 4",
+	"wooden bracelet": "+1 pip to all sides with no keywords",
+	"pocket mirror": "copy left side to rightmost side",
+	"tourmaline paraiba": "add era to all mana/manaGain sides",
+	"faerie dust": "replace blank with mana 3",
+	"tusk": "+1 pip to all heal/selfheal and defend/selfshield sides",
+	"sapphire ring": "+1 pip to all mana/manaGain sides",
+	"scorpion tail": "add weaken and pain to top and bottom sides",
+	"horned viper": "add poison to two left sides",
 };
 function setInfo() {
 	document.getElementById("info").innerHTML="";
@@ -4606,6 +5600,12 @@ function setInfo() {
 			var colour = "";
 			if (keywordColours[keyword]) {
 				colour = keywordColours[keyword].toString(16);
+				if (colour.length<6) {
+					var extra = 6-colour.length;
+					for (var j=0; j<extra; j++) {
+						colour = '0'+colour;
+					}
+				}
 			}
 			document.getElementById("info").innerHTML+="<b style=\"color:#"+colour+"\">"+keyword+"</b>: "+keywordInfo[keyword];
 			document.getElementById("info").innerHTML+="<br />";
@@ -4690,6 +5690,12 @@ function setInfo() {
 					var colour = "";
 					if (keywordColours[keyword]) {
 						colour = keywordColours[keyword].toString(16);
+								if (colour.length<6) {
+							var extra = 6-colour.length;
+							for (var j=0; j<extra; j++) {
+								colour = '0'+colour;
+							}
+						}
 					}
 					document.getElementById("info").innerHTML+="<b style=\"color:#"+colour+"\">"+keyword+"</b>: "+keywordInfo[keyword];
 				}
@@ -4701,10 +5707,12 @@ function setInfo() {
 				}
 			}
 		}
-	}else if (hoveringId==-5) {
+	} else if (hoveringId==-5) {
 		document.getElementById("info").innerHTML+=equipmentInfo[items[hoveringIndex]];
 	} else if (hoveringId==-6) {
 		document.getElementById("info").innerHTML+=equipmentInfo[inventory[hoveringIndex]];
+	} else if (hoveringId==-10) {
+		//
 	}
 }
 var enemyTurn=true;
@@ -4829,7 +5837,7 @@ function gameLoop(delta){
 
 				if (tier<=equipmentList.length) {
 					for (var i=0; i<itemCount; i++) {
-						if (equipmentTracker[tier-1].length>0) {
+						if (equipmentTracker.length>0) {
 							var idx = Math.floor(Math.random()*equipmentTracker.length);
 							item = equipmentTracker[idx];
 							items.push(item);
@@ -4849,15 +5857,22 @@ function gameLoop(delta){
 	render();
 }
 
-var equipmentList = [["ballet shoes","doom blade","scar","wolf ears","compass","rusty plate","corset","big shield"],
-["polearm","ace of spades","wandify","big hammer","kilt","origami","buckler","rain of arrows","peaked cap","autumn leaf","worn arms"],
-["enchanted shield","longbow","aegis","diving suit","whetstone","clover","ladder"],
-["dragonhide gloves","shuriken","troll nose","obol","chainmail","demon eye","whiskers","glowing egg"],
-["longsword","ordinary triangle","cocoon","monocle","doomblade","mini crossbow","whiskey"],
-["twisted flax","braids","ocular amulet","demonic deal","wrench","water"],
-["iron helm","metal studs","ornate hilt","twisted bar","anvil","troll blood"],
-["poison dip","brimstone","mirror mask","bullseye","olympian trident","singularity"],
-["helm of power","triple shuriken","collar","dumbbell","silk cape","eye of horus"],
+var equipmentList = [["ballet shoes","doom blade","scar","wolf ears","compass","rusty plate","corset","big shield","big heart", "castor root", 
+"change of heart", "seedling", "tincture", "sorcery notes", "whey", "reagents", "bowl", "memory", "quiver", "wand of wand", "iron heart", "balisong"],
+["polearm","ace of spades","wandify","big hammer","kilt","origami","buckler","rain of arrows","peaked cap","autumn leaf","worn arms","tower shield", 
+"powdered mana", "flickering blade", "blessed water", "sapphire", "citrine ring", "rejuvenation wand", "twin daggers", "fletching","terrarium"],
+["enchanted shield","longbow","aegis","diving suit","whetstone","clover","ladder","learn flare","syringe", "siphon", "pure heart pendant", "shortsword"],
+["tiara","dragonhide gloves","shuriken","troll nose","obol","chainmail","demon eye","whiskers","glowing egg","ink bottle", "magic staff", "soup", "fangs", 
+"eyepatch", "alembic", "chakram", "splitting arrows", "hissing ring", "dynamo", "mana jelly"],
+["longsword","ordinary triangle","cocoon","monocle","doomblade","mini crossbow","whiskey","simplicity", "sack of mana", "door", "lens", "pauldron", 
+"nunchaku", "glyph of purity", "shining bow", "wand grips","bandana","early grave"],
+["twisted flax","braids","ocular amulet","demonic deal","wrench","water","hourglass", "blindfold", "jump",  "lich eye", "conduit", "kite shield", 
+"karma"],
+["iron helm","metal studs","ornate hilt","twisted bar","anvil","troll blood","dragon pipe", "two reeds", "tentacle", "wandcraft", "second chance", 
+"demon claw", "broadsword", "wooden bracelet", "pocket mirror"],
+["poison dip","brimstone","mirror mask","bullseye","olympian trident","singularity","tourmaline paraiba", "faerie dust", "tusk", "sapphire ring", 
+"scorpion tail"],
+["helm of power","triple shuriken","collar","dumbbell","silk cape","eye of horus","horned viper"],
 ["shiny gauntlets"]];
 var equipmentTracker = [];
 
@@ -4886,8 +5901,8 @@ unlockButton.y = 310;
 unlockButton.alpha=0;
 app.stage.addChild(unlockButton);
 var undoButton = new PIXI.Text("UNDO");
-undoButton.x = 130;
-undoButton.y = 260;
+undoButton.x = 160;
+undoButton.y = 360;
 undoButton.alpha=0;
 app.stage.addChild(undoButton);
 var readyButton = new PIXI.Text("READY");
@@ -4901,6 +5916,199 @@ var endButtonWidth = 160;
 var unlockButtonWidth=130;
 var undoButtonWidth=100;
 var readyButtonWidth=120;
+
+var spells = [];
+var initialSpells = [];
+var spellCoords = [];
+var spellTemplate = {
+	name:"burst",
+	costType:"mana",
+	cost:2,
+	keywords:[],
+	userId:-1,
+	userIndex:-1,
+	singleCast:false,
+};
+function initSpells() {
+	var totalList = []; 
+	for (var i in dice) {
+		var list = [structuredClone(spellTemplate)];//name,cost type,cost,keywords,user dead
+		for (var j in dice[i]) {
+			for (var k in dice[i][j].spells) {
+				var tempSpell = structuredClone(dice[i][j].spells[k]);
+				list.push(tempSpell);
+			}
+			for (var k in dice[i][j].equipmentSpells) {
+				var tempSpell = structuredClone(dice[i][j].equipmentSpells[k]);
+				list.push(tempSpell);
+			}
+		}
+		totalList.push(list);
+	}
+	spells = totalList;
+}
+function repositionSpells() {
+	for (var i in spells[playerId]) {
+		var x = i*SQUARE;
+		var y = 250;
+		spellCoords[i]=[x,y];
+	}
+}
+function costAvailable(userId,type,cost) {
+	switch(type) {
+		case "damage":
+			return getDiceCost(userId,{damage:cost}).length!=0;
+			/*var damageCounter = cost;
+			for (var i in dice[playerId]) {
+				var tempFace = getFace(playerId,i,dice[playerId][i].side);
+				var tempType = tempFace[0].split(" ")[0];
+				if (tempType=="attack"&&!dice[playerId][i].used&&!dice[playerId][i].dead) {
+					damageCounter -= getPips(tempType,tempFace[1],tempFace[2],playerId,i);
+				}
+				if (damageCounter<=0) {
+					return true;
+				}
+			}*/
+		case "captain":
+			return getDiceCost(userId,{damage:3,shield:3}).length!=0;
+		case "prince":
+			return getDiceCost(userId,{damage:1,shield:1,heal:1,blank:1}).length!=0;
+		case "blank":
+			return getDiceCost(userId,{blank:cost}).length!=0;
+		case "mana":
+		default:
+			if (mana[userId][0]>=cost) {
+				return true;
+			}
+			break;
+	}
+	return false;
+}
+function payCost(id,spellIndex) {
+
+	var type = spells[id][spellIndex].costType;
+	var cost = spells[id][spellIndex].cost;
+
+	if (!costAvailable(id,type,cost)) {
+		return false;
+	}
+	var diceCostList = [];
+	switch (type) {
+		case "damage":
+			diceCostList = getDiceCost(id,{damage:cost});
+			
+			/*var damageCounter = cost;
+			for (var i in dice[id]) {
+				var tempFace = getFace(id,i,dice[id][i].side);
+				var tempType = tempFace[0].split(" ")[0];
+				if (tempType=="attack"&&!dice[id][i].used&&!dice[id][i].dead) {
+					dice[id][i].used=true;
+					damageCounter -= getPips(tempType,tempFace[1],tempFace[2],id,i);
+				}
+				if (damageCounter<=0) {
+					break;
+				}
+			}*/
+			break;
+		case "captain":
+			diceCostList = getDiceCost(id,{damage:3,shield:3});
+			break;
+		case "prince":
+			diceCostList = getDiceCost(id,{damage:1,shield:1,heal:1,blank:1});
+			break;
+		case "blank":
+			diceCostList = getDiceCost(id,{blank:cost});
+			break;
+		case "mana":
+		default:
+			mana[id][0]-=cost;
+			break;
+	}
+	for (var i in diceCostList) {
+				dice[id][diceCostList[i]].used=true;
+			}
+	return true;
+}
+function getDiceCost(id,costList) {//e.g. for prince, costList:{damage:1,shield:1,heal:1,blank:1}
+	var list = structuredClone(costList);
+	var usedList = [];
+	for (var i in dice[id]) {
+		if (dice[id][i].used||dice[id][i].dead) {
+			continue;
+		}
+		var tempFace = getFace(id,i,dice[id][i].side);
+		var pips = tempFace[1];
+		var keywords = tempFace[2];
+		var tempType = tempFace[0].split(" ")[0];
+		var included = false;
+		for (var j in list) {
+			if (list[j]<=0) {
+				continue;
+			}
+			switch (j) {
+				case "damage":
+					if (tempType=="attack") {
+						list[j]-=pips;
+						included=true;
+					}
+					break;
+				case "shield":
+					if (tempType=="defend"||tempType=="defendheal"||keywords.includes("selfshield")) {
+						list[j]-=pips;
+						included=true;
+					}
+					break;
+				case "heal":
+					if (tempType=="heal"||tempType=="defendheal"||keywords.includes("selfheal")) {
+						list[j]-=pips;
+						included=true;
+					}
+					break;
+				case "blank":
+					if (tempType=="nothing"||dice[id][i].exert>0||dice[id][i].singleUse[dice[id][i].side]||dice[id][i].petrify[dice[id][i].side]) {
+						list[j]--;
+						included=true;
+					}
+					break;
+			}
+		}
+		if (included) {
+			usedList.push(i);
+		}
+		var allCounted = true;
+		for (var j in list) {
+			if (list[j]>0) {
+				allCounted = false;
+			}
+		}
+		if (allCounted) {
+			break;
+		}
+	}
+	var allCounted = true;
+	for (var j in list) {
+		if (list[j]>0) {
+			allCounted = false;
+		}
+	}
+	if (!allCounted) {
+		return [];
+	} else {
+		return usedList;
+	}
+}
+function spellUsable(id,index) {
+	if (spells[id][index].singleCast) {
+		return false;
+	}
+	if (spells[id][index].userId==-1) {
+		return true;
+	}
+	if (!getDice(spells[id][index].userId,spells[id][index].userIndex).dead) {
+		return true;
+	}
+	return false;
+}
 function render() {
 	rerollText.text = "Rerolls: "+rerolls;
 
@@ -5076,6 +6284,20 @@ function render() {
 						break;
 				}*/
 			}
+		}
+
+		//spells = getSpells();
+		repositionSpells();
+		for (var i in spells[playerId]) {
+			g.lineStyle(2,0x000000)
+			g.beginFill(0xFFFF00);
+			if (selectedId==-10&&selectedIndex==i) {
+				g.beginFill(0x888800);
+			}
+			if (!spellUsable(playerId,i)) {
+				g.beginFill(0x880000);
+			}
+			g.drawRect(spellCoords[i][0],spellCoords[i][1],SQUARE,SQUARE);
 		}
 	//}
 	if (selectedId!=-1) {
@@ -5438,44 +6660,68 @@ function drawFace(face,x,y,id,index) {
 	g.drawRect(x,y,50,50);
 	g.lineStyle(2,0x000000);
 	var typeCheck = face[0].split(" ");
-	var tempType = face[0];
-	if (typeCheck[0]=="summon") {
-		tempType = "summon";
+	var tempType = typeCheck[0];
+	var big=false;
+	if (typeCheck.length>1) {
+		if (typeCheck[1]=="all") {
+			big=true;
+		}
 	}
 	switch(tempType) {
 		case "attack":
 			g.beginFill(0xFF0000);
-			g.drawRect(x+15,y+15,20,20);
 			break;
 		case "defend":
 			g.beginFill(0x999999);
-			g.drawRect(x+15,y+15,20,20);
 			break;
 		case "outer":
 			g.beginFill(0x555555);
-			g.drawRect(x+15,y+15,20,20);
 			break;
 		case "attack all":
 		case "attack all all":
 			g.beginFill(0xFF0000);
-			g.drawRect(x+10,y+10,30,30);
 			break;
 		case "stun":
 			g.beginFill(0x000088);
-			g.drawRect(x+15,y+15,20,20);
 			break;
 		case "reuse":
 			g.beginFill(0x0000FF);
-			g.drawRect(x+15,y+15,20,20);
 			break;
 		case "redirect":
 			g.beginFill(0x000000);
-			g.drawRect(x+15,y+15,20,20);
 			break;
 		case "summon":
 			g.beginFill(0x0000FF);
-			g.drawRect(x+15,y+15,20,20);
 			break;
+		case "undying":
+			g.beginFill(0xFFFFFF);
+			break;
+		case "inflict":
+			g.beginFill(0x00FF00);
+			break;
+		case "mana":
+			g.beginFill(0x00FFFF);
+			break;
+		case "defendheal":
+			g.beginFill(0x880088);
+			break;
+		case "revive":
+			g.beginFill(0xFF8800);
+			break;
+		case "heal":
+			g.beginFill(0x880000);
+			break;
+		case "reroll":
+			g.beginFill(0xFF00FF);
+			break;
+		case "nothing":
+			g.beginFill(0xFFFFFF);
+			g.lineStyle(0,0x000000);
+	}
+	if (big){
+		g.drawRect(x+10,y+10,30,30);
+	} else {
+		g.drawRect(x+15,y+15,20,20);
 	}
 	var originalPips = face[1];
 	var pips = face[1];
