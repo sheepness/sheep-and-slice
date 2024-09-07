@@ -15,7 +15,7 @@ var host=false;
 
 var ready = false;
 var rerolls=2;
-var round=21;
+var round=1;
 
 
 var SQUARE = 50;
@@ -916,7 +916,7 @@ socket.on("ready",(num) => {
 				starting[j]=list[0][randSelect];
 			}
 			for (var j in starting) {
-				socket.emit("init dice",i,j,"pilgrim");//starting[j]);
+				socket.emit("init dice",i,j,starting[j]);
 			}
 		}
 		socket.emit("start");
@@ -3470,6 +3470,8 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 				console.log(rerolls);
 			}
 			break;
+		case "revive":
+
 	}
 }
 function gainMana(id,pips) {
