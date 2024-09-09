@@ -22,14 +22,15 @@ var SQUARE = 50;
 
 var inventory=[];
 socket.on("add to inventory", (item)=> {
-	if (gameState="equipment") {
+	if (gameState!="waiting") {
 		inventory.push(item);
+		console.log("INVENTORY ADD "+item);
 	}
 });
-socket.on("equip",(id,index,itemIndex)=> {
+socket.on("equip",(id,index,itemIndex,pos)=> {
 
-	if (gameState="inventory") {
-		getDice(id,index).equipment.push(inventory[itemIndex]);
+	if (gameState!="waiting") {
+		getDice(id,index).equipment[pos]=inventory[itemIndex];
 		inventory.splice(itemIndex,1);
 			processEquipment();
 			updateText();
@@ -128,8 +129,13 @@ function getSpellByName(name,id,index) {
 socket.on("unequip",(id,index,itemIndex)=> {
 	console.log("unequip"+index);
 	//if (gameState=="inventory") {
-		inventory.push(getDice(id,index).equipment[itemIndex]);
-		getDice(id,index).equipment.splice(itemIndex,1);
+		var tempItem = getDice(id,index).equipment[itemIndex];
+		if (tempItem!="") {
+			inventory.push(getDice(id,index).equipment[itemIndex]);
+		}
+		console.log("INVENTORY ADD "+tempItem);
+		//getDice(id,index).equipment.splice(itemIndex,1);
+		getDice(id,index).equipment[itemIndex] = "";
 		processEquipment();
 		updateText();
 	//}
@@ -868,9 +874,7 @@ function spawnFight() {
 			socket.emit("spawn",randFight[i]);
 		}
 	} else {
-		socket.emit("spawn","fanatic");
-		socket.emit("spawn","fanatic");
-		socket.emit("spawn","fanatic");
+		socket.emit("spawn","slimelet");
 	}
 	//socket.emit("send","update text");
 }
@@ -2165,20 +2169,46 @@ document.addEventListener('mouseup', (event) => {
 	} else if (inventoryTurn) {
 		console.log(hoveringIndex);
 		if (selectedId==-6) {
-			if (hoveringId==playerId&&getDice(playerId,hoveringIndex).equipment.length<getDice(playerId,hoveringIndex).maxEquipment) {
-				socket.emit("equip",playerId,hoveringIndex,selectedIndex);
+			if (hoveringId==playerId) {
+				var equipIdx=-1;
+				for (var i in dice[playerId][hoveringIndex].equipment) {
+					if (dice[playerId][hoveringIndex].equipment[i]=="") {
+						equipIdx=i;
+						break;
+					}
+				}
+				if (equipIdx==-1) {
+					equipIdx = dice[playerId][hoveringIndex].equipment.length;
+				}
+				if (equipIdx<dice[playerId][hoveringIndex].maxEquipment) {
+					socket.emit("equip",playerId,hoveringIndex,selectedIndex,equipIdx);
+				}
 			}
 			selectedId=-1;
 			selectedIndex=-1;
+		} else if (selectedId==playerId) {
+			if (hoveringId==-4) {
+				if (hoveringIndex==-2) {
+					if (getDice(selectedId,selectedIndex).equipment[0]!="") {
+						socket.emit("unequip",playerId,selectedIndex,0);
+					}
+				} else if (hoveringIndex==-3) {
+					if (getDice(selectedId,selectedIndex).equipment[1]!="") {
+						socket.emit("unequip",playerId,selectedIndex,1);
+					}
+				}
+			}
 		} else {
 			if (hoveringId==-6) {
 				selectedId=-6;
 				selectedIndex = hoveringIndex;
-			} else if (hoveringId==playerId) {
+			} else if (hoveringId>=0) {
 				//unequip
-				if (event.button==0) {
+				selectedId=hoveringId;
+				selectedIndex = hoveringIndex;
+				/*if (event.button==0) {
 					unequip(hoveringIndex);
-				}
+				*/
 			}
 		}
 		if (pointInRect(x,y,readyButton.x,readyButton.y,readyButtonWidth,SQUARE)) {
@@ -2793,7 +2823,7 @@ function getRedirectedTarget(targetId,targetIndex) {
 	}
 	var target = getDice(targetId,targetIndex);
 	var counter=0;
-	while (target.redirectId!=-1&&counter<10) {
+	while (target.redirectId!=-1&&counter<100) {
 		targetId = target.redirectId;
 		targetIndex = target.redirectIndex;
 		//target = getDice(targetId,targetIndex);
@@ -2802,7 +2832,7 @@ function getRedirectedTarget(targetId,targetIndex) {
 		}
 		target = getDice(targetId,targetIndex);
 		counter++;
-		if (counter==10) {
+		if (counter==100) {
 			console.log("how the fuck");
 		}
 	}
@@ -3164,7 +3194,8 @@ function faceAction(face,userId,userIndex,targetId,targetIndex) {
 	act(type,pips,userId,userIndex,targetId,targetIndex,keywords);
 
 	if (effects.pain) {
-		hurt(userId,userIndex,pips);
+		var [newId,newIndex] = getRedirectedTarget(userId,userIndex);
+		hurt(newId,newIndex,pips);
 	}
 	var lethal = false;
 	if (effects.death) {
@@ -3418,7 +3449,8 @@ function act(type,pips,userId,userIndex,targetId,targetIndex,keywords) {
 		case "attack all":
 		case "attack all all":
 			hurt(targetId,targetIndex,Math.max(0,pips-target.armour));
-			hurt(userId,userIndex,target.thorns);
+			var [newId,newIndex]=getRedirectedTarget(userId,userIndex);
+			hurt(newId,newIndex,target.thorns);
 			break;
 		case "defend":
 			defend(targetId,targetIndex,pips);
@@ -5589,6 +5621,7 @@ var equipmentInfo = {
 	"sapphire ring": "+1 pip to all mana/manaGain sides",
 	"scorpion tail": "add weaken and pain to top and bottom sides",
 	"horned viper": "add poison to two left sides",
+	"": "",
 };
 function setInfo() {
 	document.getElementById("info").innerHTML="";
@@ -6302,7 +6335,7 @@ function render() {
 			g.drawRect(spellCoords[i][0],spellCoords[i][1],SQUARE,SQUARE);
 		}
 	//}
-	if (selectedId!=-1) {
+	if (selectedId!=-1&&selectedId>=-3) {
 		drawNet(selectedId,selectedIndex,netX,netY);
 	} else if (hoveringId!=-1) {
 		drawNet(hoveringId,hoveringIndex,netX,netY);
@@ -6652,7 +6685,9 @@ function drawNet(id,index,x,y) {
 		if (i>itemNetCoords.length) {
 			//uhhh
 		} else {
-			drawItem(getDice(id,index).equipment[i],x+itemNetCoords[i][0],y+itemNetCoords[i][1]);
+			if (getDice(id,index).equipment[i]!="") {
+				drawItem(getDice(id,index).equipment[i],x+itemNetCoords[i][0],y+itemNetCoords[i][1]);
+			}
 		}
 	}
 }
